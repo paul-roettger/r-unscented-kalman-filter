@@ -55,14 +55,6 @@ impl MatrixAsym {
             Ok(result)
         }
     }
-
-    pub async fn transp(&self) -> Self
-    {
-        let result = MatrixAsym::new(self.n, self.m).await;
-
-        result
-    }
-    
 }
 
 impl fmt::Display for MatrixAsym{
@@ -84,10 +76,11 @@ impl fmt::Display for MatrixAsym{
     }
 }
 
+
 impl MatrixSym {
     pub async fn new(m: usize) -> Self{
         Self { m: m, 
-               val: vec![0.0; m*(m-1)/2].into_boxed_slice() }
+               val: vec![0.0; m*m].into_boxed_slice() }
     }
 
     pub async fn b_mul_self_mult_bt(&self, b: &MatrixAsym) -> Result<MatrixSym, &'static str>{
@@ -110,16 +103,50 @@ impl MatrixSym {
             Ok(result)
         }
     }
+
+    pub async fn normalize(&mut self){
+        let mut i: usize;
+        let mut j: usize;
+        let mut i_transp: usize;
+        let mut var : Vec<_> = self.val.deref_mut().iter_mut().collect();
+        for i_loop in 0..var.len(){
+            i = i_loop % self.m;
+            j = i_loop/self.m;
+            if i < j{
+                i_transp = i*self.m+j;
+                *var[i_loop] += *var[i_transp];
+                *var[i_loop] /= 2.0;
+                *var[i_transp] = *var[i_loop]
+            }
+        }
+    }
 }
 
+impl fmt::Display for MatrixSym{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let array = &self.val;
 
+        write!(f, "[")?;
+
+        for (i, item) in array.iter().enumerate() {
+            if i % self.m == 0{
+                write!(f, "\n ")?;
+            } else if i > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{}", *item)?;
+        }
+
+        write!(f, "]")
+    }
+}
 
 #[cfg(test)]
 mod tests {
 
     use futures::executor::block_on;
 
-    use crate::MatrixAsym;
+    use crate::{MatrixAsym, MatrixSym};
 
     #[test]
     fn add_test() {
@@ -158,4 +185,18 @@ mod tests {
         print!("{}\n*{}\n={}",a,b,c);     
  
     }
+
+    #[test]
+    fn normal_test() {
+        let mut a = MatrixSym{
+            m: 3,
+            val: vec![1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0].into_boxed_slice()
+        };
+        print!("{}\n",a); 
+
+        block_on(a.normalize());
+        print!("{}\n",a);    
+ 
+    }
+
 }
