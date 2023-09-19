@@ -7,139 +7,119 @@ fn main() {
     println!("Hello, world!");
 }
 
-
-struct MatrixAsym{
-    pub m: usize,
-    pub n: usize,
-    pub val: Box<[f64]>
+struct MatrixAsym<const M: usize, const N: usize>{
+    pub val: [[f64;M];N]
 }
 
-struct MatrixSym{
-    pub m: usize,
-    pub val: Box<[f64]>
-}
+struct MatrixSym<const M: usize>(MatrixAsym<M,M>);
 
-impl MatrixAsym {
-    pub async fn new(m: usize, n: usize) -> Self{
+impl<const M: usize, const N: usize> MatrixAsym<M,N>{
 
-        Self { m: m, 
-               n: n, 
-               val: vec![0.0; m*n].into_boxed_slice() }
+    pub fn new() -> Self{
+        Self { val: [[0.0; M];N] }
     }
 
-    pub async fn add(&mut self, b: &MatrixAsym) -> Result<&Self, &'static str>{
-        if self.m != b.m || self.n != b.n{
-            Err("Invalid dimension")
-        }else{
-            for (a, b) in self.val.deref_mut().iter_mut().zip(b.val.iter()){
-                *a += b;
+    pub async fn add(&mut self, b: &MatrixAsym<M,N>) -> &Self{
+        for (linea, lineb) in self.deref_mut().iter_mut().zip(b.deref().iter()){
+            for (a,b) in linea.iter_mut().zip(lineb.iter()){
+                *a += *b;
             }
-            Ok(self)
         }
+        self
     }
 
-    pub async fn mult(&self, b: &MatrixAsym) -> Result<Self, &'static str>{
-        if self.m != b.n{
-            Err("Invalid dimension")
-        }else{
-            let mut result = MatrixAsym::new(self.n, b.m).await;
-            let mut i: usize;
-            let mut j: usize;
-            for (i_loop, c) in result.val.deref_mut().iter_mut().enumerate(){
-                i = i_loop % result.m;
-                j = i_loop/result.m;
-                *c = self.val.deref().iter().skip(j*result.m).take(result.m)
-                    .zip(b.val.deref().iter().skip(i).step_by(b.m))
-                    .map(|(a,b)| *a*(*b)).sum();
-            }
-            Ok(result)
-        }
-    }
-}
+    pub async fn mult<const U: usize>(&self, b: &MatrixAsym<N,U>) -> Result<MatrixAsym<M,U>, &'static str>{
 
-impl fmt::Display for MatrixAsym{
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let array = &self.val;
+        let mut result = MatrixAsym::new();
 
-        write!(f, "[")?;
-
-        for (i, item) in array.iter().enumerate() {
-            if i % self.m == 0{
-                write!(f, "\n ")?;
-            } else if i > 0 {
-                write!(f, ", ")?;
-            }
-            write!(f, "{}", *item)?;
-        }
-
-        write!(f, "]")
-    }
-}
-
-
-impl MatrixSym {
-    pub async fn new(m: usize) -> Self{
-        Self { m: m, 
-               val: vec![0.0; m*m].into_boxed_slice() }
-    }
-
-    pub async fn b_mul_self_mult_bt(&self, b: &MatrixAsym) -> Result<MatrixSym, &'static str>{
-        if self.m != b.n{
-            Err("Invalid dimension")
-        }else{
-            let mut result = MatrixSym::new(self.m).await;
-            let mut i: usize;
-            let mut j: usize;
-            for (i_loop, c) in result.val.deref_mut().iter_mut().enumerate(){
-                i = i_loop % result.m;
-                j = i_loop/result.m;
-                if i>j {
-                    (i,j) = (j,i);
+        for i in 0..M {
+            for j in 0..U {
+                let mut sum = 0.0;
+                for k in 0..N {
+                    sum += self.val[i][k] * b.val[k][j];
                 }
-                *c = self.val.deref().iter().skip(j*result.m).take(result.m)
-                    .zip(b.val.deref().iter().skip(i).step_by(b.m))
-                    .map(|(a,b)| *a*(*b)).sum();
+                result.val[i][j] = sum;
             }
-            Ok(result)
         }
-    }
 
-    pub async fn normalize(&mut self){
-        let mut i: usize;
-        let mut j: usize;
-        let mut i_transp: usize;
-        let mut var : Vec<_> = self.val.deref_mut().iter_mut().collect();
-        for i_loop in 0..var.len(){
-            i = i_loop % self.m;
-            j = i_loop/self.m;
-            if i < j{
-                i_transp = i*self.m+j;
-                *var[i_loop] += *var[i_transp];
-                *var[i_loop] /= 2.0;
-                *var[i_transp] = *var[i_loop]
-            }
-        }
+        Ok(result)
     }
 }
 
-impl fmt::Display for MatrixSym{
+impl<const M: usize, const N: usize> Deref for MatrixAsym<M,N>
+{
+    type Target = [[f64;M];N];
+
+    fn deref(&self) -> &Self::Target{
+        &self.val
+    }
+}
+
+impl<const M: usize, const N: usize> DerefMut for MatrixAsym<M,N>
+{
+    fn deref_mut(&mut self) -> &mut Self::Target{
+        &mut self.val
+    }
+}
+
+
+impl<const M: usize, const N: usize> fmt::Display for MatrixAsym<M,N>{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let array = &self.val;
-
-        write!(f, "[")?;
-
-        for (i, item) in array.iter().enumerate() {
-            if i % self.m == 0{
-                write!(f, "\n ")?;
-            } else if i > 0 {
-                write!(f, ", ")?;
+        write!(f, "[\n")?;
+        for line in self.deref(){
+            write!(f, "[")?;
+            for item in line{
+                write!(f, "{},", *item)?;
             }
-            write!(f, "{}", *item)?;
+            write!(f, "]\n")?;
         }
-
         write!(f, "]")
     }
 }
+
+
+impl<const M: usize> MatrixSym<M>{
+    pub fn new() -> Self{
+        Self { 0: MatrixAsym::new() }
+    }
+
+    //pub async fn b_mul_self_mult_bt(&self, b: &MatrixAsym) -> Result<MatrixSym, &'static str>{
+        
+    //}
+
+    pub async fn symmetrize(&mut self){
+        for i in 1..M{
+            for j in 0..i{
+                    self.0.val[j][i] += self.0.val[i][j];
+                    self.0.val[j][i] /= 2.0;
+                    self.0.val[i][j] = self.0.val[j][i];
+            }
+        }
+    }
+}
+
+impl<const M: usize> Deref for MatrixSym<M>
+{
+    type Target = [[f64;M];M];
+
+    fn deref(&self) -> &Self::Target{
+        &self.0.deref()
+    }
+}
+
+impl<const M: usize> DerefMut for MatrixSym<M>
+{
+    fn deref_mut(&mut self) -> &mut Self::Target{
+        let reference = self.0.deref_mut();
+        reference
+    }
+}
+
+impl<const M: usize> fmt::Display for MatrixSym<M>{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.0.fmt(f)
+    }
+} 
 
 #[cfg(test)]
 mod tests {
@@ -150,51 +130,49 @@ mod tests {
 
     #[test]
     fn add_test() {
-        let mut a = MatrixAsym{
-            m: 2,
-            n: 4,
-            val: vec![1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0].into_boxed_slice()
-        };
+        let mut a = MatrixAsym::new();
+        *a = [[1.0,2.0],
+              [3.0,4.0],
+              [5.0,6.0],
+              [7.0,8.0]];
 
-        let b = MatrixAsym{
-            m: 2,
-            n: 4,
-            val: vec![-1.0,-2.0,-3.0,-4.0,-5.0,-6.0,-7.0,-8.0].into_boxed_slice()
-        };
-        let c = block_on(a.add(&b)).unwrap();
+        let mut b = MatrixAsym::new();
+        *b = [[-1.0,-2.0],
+              [-3.0,-4.0],
+              [-5.0,-6.0],
+              [-7.0,-8.0]];
 
+        let c = block_on(a.add(&b));
         print!("{}",*c);     
  
     }
 
     #[test]
     fn mul_test() {
-        let a = MatrixAsym{
-            m: 3,
-            n: 3,
-            val: vec![1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0].into_boxed_slice()
-        };
+        let mut a = MatrixAsym::new();
+        *a = [[1.0,2.0],
+              [3.0,4.0]];
 
-        let b = MatrixAsym{
-            m: 3,
-            n: 3,
-            val: vec![1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0].into_boxed_slice()
-        };
+        let mut b = MatrixAsym::new();
+        *b = [[-1.0,0.0],
+              [0.0,-1.0]];
+
         let c = block_on(a.mult(&b)).unwrap();
 
         print!("{}\n*{}\n={}",a,b,c);     
  
     }
+    
 
     #[test]
     fn normal_test() {
-        let mut a = MatrixSym{
-            m: 3,
-            val: vec![1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0].into_boxed_slice()
-        };
-        print!("{}\n",a); 
+        let mut a = MatrixSym::new();
+        *a =   [[1.0,2.0,1.0,2.0],
+                [3.0,4.0,1.0,2.0],
+                [5.0,6.0,1.0,2.0],
+                [7.0,8.0,1.0,2.0]];
 
-        block_on(a.normalize());
+        block_on(a.symmetrize());
         print!("{}\n",a);    
  
     }
