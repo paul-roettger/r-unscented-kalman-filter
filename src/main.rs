@@ -28,21 +28,20 @@ impl<const M: usize, const N: usize> MatrixAsym<M,N>{
         self
     }
 
-    pub async fn mult<const U: usize>(&self, b: &MatrixAsym<N,U>) -> Result<MatrixAsym<M,U>, &'static str>{
+    pub async fn mult<const U: usize>(&self, b: &MatrixAsym<U,M>) -> MatrixAsym<U,N>{
 
         let mut result = MatrixAsym::new();
-
-        for i in 0..M {
+        let mut sum;
+        for i in 0..N {
             for j in 0..U {
-                let mut sum = 0.0;
-                for k in 0..N {
+                sum = 0.0;
+                for k in 0..M {
                     sum += self.val[i][k] * b.val[k][j];
                 }
                 result.val[i][j] = sum;
             }
         }
-
-        Ok(result)
+        result
     }
 }
 
@@ -83,16 +82,38 @@ impl<const M: usize> MatrixSym<M>{
         Self { 0: MatrixAsym::new() }
     }
 
-    //pub async fn b_mul_self_mult_bt(&self, b: &MatrixAsym) -> Result<MatrixSym, &'static str>{
-        
-    //}
+    pub async fn b_mul_self_mult_bt<const U: usize>(&self, b: &MatrixAsym<M,U>) -> MatrixSym<U>{
+        let mut result = MatrixSym::new();
+        let mut tmp = [[0.0; M]; U];
+        let mut sum;
+        for i in 0..U{
+            for j in 0..M {
+                sum = 0.0;
+                for k in 0..M {
+                    sum += b.val[i][k] * self.0.val[k][j];
+                }
+                tmp[i][j] = sum;
+            }
+        }
+        for i in 0..U {
+            for j in 0..=i {
+                sum = 0.0;
+                for k in 0..M {
+                    sum += tmp[i][k] * b.val[j][k];
+                }
+                result.0.val[i][j] = sum;
+                result.0.val[j][i] = sum;
+            }
+        }
+        result
+    }
 
-    pub async fn symmetrize(&mut self){
+    pub fn symmetrize(&mut self){
         for i in 1..M{
             for j in 0..i{
-                    self.0.val[j][i] += self.0.val[i][j];
-                    self.0.val[j][i] /= 2.0;
-                    self.0.val[i][j] = self.0.val[j][i];
+                self.0.val[j][i] += self.0.val[i][j];
+                self.0.val[j][i] /= 2.0;
+                self.0.val[i][j] = self.0.val[j][i];
             }
         }
     }
@@ -150,19 +171,21 @@ mod tests {
     #[test]
     fn mul_test() {
         let mut a = MatrixAsym::new();
-        *a = [[1.0,2.0],
-              [3.0,4.0]];
+        *a = [[3.0,2.0,1.0],
+              [1.0,0.0,2.0],
+              [3.0,2.0,1.0],
+              [1.0,0.0,2.0]];
 
         let mut b = MatrixAsym::new();
-        *b = [[-1.0,0.0],
-              [0.0,-1.0]];
+        *b = [[1.0,2.0],
+              [0.0,1.0],
+              [4.0,0.0]];
 
-        let c = block_on(a.mult(&b)).unwrap();
+        let c = block_on(a.mult(&b));
 
         print!("{}\n*{}\n={}",a,b,c);     
  
-    }
-    
+    }    
 
     #[test]
     fn normal_test() {
@@ -172,8 +195,35 @@ mod tests {
                 [5.0,6.0,1.0,2.0],
                 [7.0,8.0,1.0,2.0]];
 
-        block_on(a.symmetrize());
+        a.symmetrize();
         print!("{}\n",a);    
+ 
+    }
+
+    #[test]
+    fn normal_mult_t() {
+        let mut a = MatrixSym::new();
+        *a =   [[1.0,2.0,1.0,2.0],
+                [2.0,4.0,1.0,2.0],
+                [1.0,1.0,1.0,2.0],
+                [2.0,2.0,2.0,2.0]];
+
+        let mut b = MatrixAsym::new();
+        *b =   [[0.0,1.0,2.0,3.0],
+                [4.0,3.0,2.0,1.0]];
+
+        let mut c = MatrixAsym::new();
+        *c =   [[0.0,4.0],
+                [1.0,3.0],
+                [2.0,2.0],
+                [3.0,1.0]];
+
+        let d = block_on(a.b_mul_self_mult_bt(&b));
+        print!("{}\n",d); 
+
+        let tmp = block_on(b.mult(&(a.0)));
+        let e = block_on(tmp.mult(&c));
+        print!("{}\n",e); 
  
     }
 
