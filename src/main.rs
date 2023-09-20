@@ -108,15 +108,70 @@ impl<const M: usize> MatrixSym<M>{
         result
     }
 
-    pub fn symmetrize(&mut self){
-        for i in 1..M{
-            for j in 0..i{
-                self.0.val[j][i] += self.0.val[i][j];
-                self.0.val[j][i] /= 2.0;
-                self.0.val[i][j] = self.0.val[j][i];
+    pub async fn chol_solve<const U: usize>(&self, b: &MatrixAsym<U,M>) -> Result<MatrixAsym<U,M>, &'static str>{
+        let mut result = MatrixAsym::new();
+        let mut m_l = [[0.0;M];M];
+        let mut m_y = [[0.0;U];M];
+        let mut sum;
+
+        /* Cholesky decomposition */
+        for i in 0..M{
+            for j in 0..=i{
+
+                sum = 0.0;
+                for k in 0..j{
+                    sum += m_l[i][k] * m_l[j][k];
+                }
+
+                if i == j{
+                    if self[i][i] - sum >= 0.0 {
+                        m_l[i][j] = (self[i][i] - sum).sqrt();
+                    }else {
+                        return Err("Negative squareroot");
+                    }
+                } else {
+                    if m_l[j][j] != 0.0{
+                        m_l[i][j] = (1.0 / m_l[j][j]) * (self[i][j] - sum);
+                    }else{
+                        return Err("Div 0");
+                    }
+                }
             }
         }
+
+        /* forward substitution */
+        for i in 0..U{
+            for j in 0..M{
+                sum = 0.0;
+                for k in 0..j{
+                    sum += m_y[k][i] * m_l[j][k];
+                }
+                if m_l[j][j] != 0.0{
+                    m_y[j][i] = (b[j][i]-sum)/m_l[j][j];
+                }else{
+                    return Err("Div 0");
+                }
+            }
+        }
+
+        /* back substitution */
+        for i in 0..U{
+            for j in (0..M).rev(){
+                sum = 0.0;
+                for k in (j..M).rev(){
+                    sum += result[k][i] * m_l[k][j];
+                }
+                if m_l[j][j] != 0.0{
+                    result[j][i] = (m_y[j][i]-sum)/m_l[j][j];
+                }else{
+                    return Err("Div 0");
+                }
+            }
+        }
+        Ok(result)
     }
+
+
 }
 
 impl<const M: usize> Deref for MatrixSym<M>
@@ -188,19 +243,6 @@ mod tests {
     }    
 
     #[test]
-    fn normal_test() {
-        let mut a = MatrixSym::new();
-        *a =   [[1.0,2.0,1.0,2.0],
-                [3.0,4.0,1.0,2.0],
-                [5.0,6.0,1.0,2.0],
-                [7.0,8.0,1.0,2.0]];
-
-        a.symmetrize();
-        print!("{}\n",a);    
- 
-    }
-
-    #[test]
     fn normal_mult_t() {
         let mut a = MatrixSym::new();
         *a =   [[1.0,2.0,1.0,2.0],
@@ -225,6 +267,21 @@ mod tests {
         let e = block_on(tmp.mult(&c));
         print!("{}\n",e); 
  
+    }
+
+    #[test]
+    fn matrix_inv() {
+        let mut a = MatrixSym::new();
+        *a =   [[2.0, 1.0],
+                [1.0,9.0]];
+
+        let mut b = MatrixAsym::new();
+        *b =   [[1.0, 0.0],
+                [0.0, 1.0]];
+
+        let b = block_on(a.chol_solve(&b)).unwrap();
+        print!("{}\n",b); 
+
     }
 
 }
