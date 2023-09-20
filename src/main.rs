@@ -36,9 +36,9 @@ impl<const M: usize, const N: usize> MatrixAsym<M,N>{
             for j in 0..U {
                 sum = 0.0;
                 for k in 0..M {
-                    sum += self.val[i][k] * b.val[k][j];
+                    sum += self[i][k] * b[k][j];
                 }
-                result.val[i][j] = sum;
+                result[i][j] = sum;
             }
         }
         result
@@ -90,7 +90,7 @@ impl<const M: usize> MatrixSym<M>{
             for j in 0..M {
                 sum = 0.0;
                 for k in 0..M {
-                    sum += b.val[i][k] * self.0.val[k][j];
+                    sum += b[i][k] * self[k][j];
                 }
                 tmp[i][j] = sum;
             }
@@ -99,10 +99,10 @@ impl<const M: usize> MatrixSym<M>{
             for j in 0..=i {
                 sum = 0.0;
                 for k in 0..M {
-                    sum += tmp[i][k] * b.val[j][k];
+                    sum += tmp[i][k] * b[j][k];
                 }
-                result.0.val[i][j] = sum;
-                result.0.val[j][i] = sum;
+                result[i][j] = sum;
+                result[j][i] = sum;
             }
         }
         result
