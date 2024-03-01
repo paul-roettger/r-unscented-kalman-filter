@@ -19,7 +19,7 @@ impl<const M: usize, const N: usize> MatrixAsym<M,N>{
         Self { val: [[0.0; M];N] }
     }
 
-    pub async fn add(&mut self, b: &MatrixAsym<M,N>) -> &Self{
+    pub fn add(&mut self, b: &MatrixAsym<M,N>) -> &Self{
         for (linea, lineb) in self.deref_mut().iter_mut().zip(b.deref().iter()){
             for (a,b) in linea.iter_mut().zip(lineb.iter()){
                 *a += *b;
@@ -28,7 +28,7 @@ impl<const M: usize, const N: usize> MatrixAsym<M,N>{
         self
     }
 
-    pub async fn mult<const U: usize>(&self, b: &MatrixAsym<U,M>) -> MatrixAsym<U,N>{
+    pub fn mult<const U: usize>(&self, b: &MatrixAsym<U,M>) -> MatrixAsym<U,N>{
 
         let mut result = MatrixAsym::new();
         let mut sum;
@@ -82,7 +82,7 @@ impl<const M: usize> MatrixSym<M>{
         Self { 0: MatrixAsym::new() }
     }
 
-    pub async fn b_mul_self_mult_bt<const U: usize>(&self, b: &MatrixAsym<M,U>) -> MatrixSym<U>{
+    pub fn b_mul_self_mult_bt<const U: usize>(&self, b: &MatrixAsym<M,U>) -> MatrixSym<U>{
         let mut result = MatrixSym::new();
         let mut tmp = [[0.0; M]; U];
         let mut sum;
@@ -108,7 +108,7 @@ impl<const M: usize> MatrixSym<M>{
         result
     }
 
-    pub async fn chol_solve<const U: usize>(&self, b: &MatrixAsym<U,M>) -> Result<MatrixAsym<U,M>, &'static str>{
+    pub fn chol_solve<const U: usize>(&self, b: &MatrixAsym<U,M>) -> Result<MatrixAsym<U,M>, &'static str>{
         let mut result = MatrixAsym::new();
         let mut m_l = [[0.0;M];M];
         let mut m_y = [[0.0;U];M];
@@ -197,10 +197,19 @@ impl<const M: usize> fmt::Display for MatrixSym<M>{
     }
 } 
 
+struct UKF<const L: usize> {
+    pub alpha: f64,
+    pub beta: f64,
+    pub kappa: f64,
+    pub lambda: f64,
+    wmc0: f64,
+    wma: [f64; L],
+    wmb: [f64; L],
+}
+
+
 #[cfg(test)]
 mod tests {
-
-    use futures::executor::block_on;
 
     use crate::{MatrixAsym, MatrixSym};
 
@@ -218,7 +227,7 @@ mod tests {
               [-5.0,-6.0],
               [-7.0,-8.0]];
 
-        let c = block_on(a.add(&b));
+        let c = a.add(&b);
         print!("{}",*c);     
  
     }
@@ -236,7 +245,7 @@ mod tests {
               [0.0,1.0],
               [4.0,0.0]];
 
-        let c = block_on(a.mult(&b));
+        let c = a.mult(&b);
 
         print!("{}\n*{}\n={}",a,b,c);     
  
@@ -260,11 +269,11 @@ mod tests {
                 [2.0,2.0],
                 [3.0,1.0]];
 
-        let d = block_on(a.b_mul_self_mult_bt(&b));
+        let d = a.b_mul_self_mult_bt(&b);
         print!("{}\n",d); 
 
-        let tmp = block_on(b.mult(&(a.0)));
-        let e = block_on(tmp.mult(&c));
+        let tmp = b.mult(&(a.0));
+        let e = tmp.mult(&c);
         print!("{}\n",e); 
  
     }
@@ -279,7 +288,7 @@ mod tests {
         *b =   [[1.0, 0.0],
                 [0.0, 1.0]];
 
-        let b = block_on(a.chol_solve(&b)).unwrap();
+        let b = a.chol_solve(&b).unwrap();
         print!("{}\n",b); 
 
     }
