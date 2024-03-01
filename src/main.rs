@@ -211,8 +211,7 @@ struct UKF<const L: usize> {
     pub lambda: f64,
     wmc0: f64,
     wm0: f64,
-    wma: [f64; L],
-    wmb: [f64; L]
+    wma: [f64; L]
 }
 
 impl<const L: usize> UKF<L>{
@@ -227,8 +226,7 @@ impl<const L: usize> UKF<L>{
             lambda,
             wm0: lambda/(lambda + L as f64),
             wmc0: lambda/(lambda + L as f64) + 1.0 - alpha*alpha + beta,
-            wma: [1.0/(2.0*(lambda + L as f64)); L],
-            wmb : [0.0; L]
+            wma: [1.0/(2.0*(lambda + L as f64)); L]
         }
     }
 }
