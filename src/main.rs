@@ -1,5 +1,5 @@
 use std::ops::{DerefMut, Deref};
-use std::fmt;
+use std::{fmt, vec};
 use std::convert::From;
 use futures::executor::block_on;
 
@@ -108,11 +108,9 @@ impl<const M: usize> MatrixSym<M>{
         result
     }
 
-    pub fn chol_solve<const U: usize>(&self, b: &MatrixAsym<U,M>) -> Result<MatrixAsym<U,M>, &'static str>{
-        let mut result = MatrixAsym::new();
-        let mut m_l = [[0.0;M];M];
-        let mut m_y = [[0.0;U];M];
+    pub fn chol(&self) -> Result<MatrixAsym<M,M>, &'static str>{
         let mut sum;
+        let mut result = MatrixAsym::new();
 
         /* Cholesky decomposition */
         for i in 0..M{
@@ -120,24 +118,33 @@ impl<const M: usize> MatrixSym<M>{
 
                 sum = 0.0;
                 for k in 0..j{
-                    sum += m_l[i][k] * m_l[j][k];
+                    sum += result[i][k] * result[j][k];
                 }
 
                 if i == j{
                     if self[i][i] - sum >= 0.0 {
-                        m_l[i][j] = (self[i][i] - sum).sqrt();
+                        result[i][j] = (self[i][i] - sum).sqrt();
                     }else {
                         return Err("Negative squareroot");
                     }
                 } else {
-                    if m_l[j][j] != 0.0{
-                        m_l[i][j] = (1.0 / m_l[j][j]) * (self[i][j] - sum);
+                    if result[j][j] != 0.0{
+                        result[i][j] = (1.0 / result[j][j]) * (self[i][j] - sum);
                     }else{
                         return Err("Div 0");
                     }
                 }
             }
         }
+        Ok(result)
+    }
+
+    pub fn chol_solve<const U: usize>(&self, b: &MatrixAsym<U,M>) -> Result<MatrixAsym<U,M>, &'static str>{
+        let mut result = MatrixAsym::new();
+        let mut m_y = [[0.0;U];M];
+        let mut sum;
+
+        let mut m_l = self.chol()?;
 
         /* forward substitution */
         for i in 0..U{
@@ -203,10 +210,28 @@ struct UKF<const L: usize> {
     pub kappa: f64,
     pub lambda: f64,
     wmc0: f64,
+    wm0: f64,
     wma: [f64; L],
-    wmb: [f64; L],
+    wmb: [f64; L]
 }
 
+impl<const L: usize> UKF<L>{
+    pub fn new(alpha: f64, beta: f64, kappa: f64) -> Self{
+
+        let lambda = alpha*alpha*(L as f64 + kappa) - L as f64;
+
+        Self { 
+            alpha,
+            beta,
+            kappa,
+            lambda,
+            wm0: lambda/(lambda + L as f64),
+            wmc0: lambda/(lambda + L as f64) + 1.0 - alpha*alpha + beta,
+            wma: [1.0/(2.0*(lambda + L as f64)); L],
+            wmb : [0.0; L]
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
