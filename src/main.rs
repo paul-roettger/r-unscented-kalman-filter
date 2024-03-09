@@ -7,10 +7,12 @@ fn main() {
     println!("Hello, world!");
 }
 
+#[derive(Copy, Clone)]
 struct MatrixAsym<const M: usize, const N: usize>{
     pub val: [[f64;M];N]
 }
 
+#[derive(Copy, Clone)]
 struct MatrixSym<const M: usize>(MatrixAsym<M,M>);
 
 impl<const M: usize, const N: usize> MatrixAsym<M,N>{
@@ -23,6 +25,15 @@ impl<const M: usize, const N: usize> MatrixAsym<M,N>{
         for (linea, lineb) in self.deref_mut().iter_mut().zip(b.deref().iter()){
             for (a,b) in linea.iter_mut().zip(lineb.iter()){
                 *a += *b;
+            }
+        }
+        self
+    }
+
+    pub fn sub(&mut self, b: &MatrixAsym<M,N>) -> &Self{
+        for (linea, lineb) in self.deref_mut().iter_mut().zip(b.deref().iter()){
+            for (a,b) in linea.iter_mut().zip(lineb.iter()){
+                *a -= *b;
             }
         }
         self
@@ -42,6 +53,15 @@ impl<const M: usize, const N: usize> MatrixAsym<M,N>{
             }
         }
         result
+    }
+
+    pub fn scalar_prod(&mut self, b: f64) -> &Self{
+        for line in self.deref_mut().iter_mut(){
+            for value in line.iter_mut(){
+                *value *= b;
+            }
+        }
+        self
     }
 }
 
@@ -204,30 +224,100 @@ impl<const M: usize> fmt::Display for MatrixSym<M>{
     }
 } 
 
-struct UKF<const L: usize> {
+
+struct UKF<const L: usize, const M: usize, const N: usize> {
     pub alpha: f64,
     pub beta: f64,
     pub kappa: f64,
     pub lambda: f64,
+    F: fn(&MatrixAsym<1,L>, &MatrixAsym<1,N>,) -> MatrixAsym<1,L>,
     wmc0: f64,
     wm0: f64,
-    wma: [f64; L]
+    wma: f64,
+    q: MatrixSym<L>,
+    r: MatrixSym<M>,
+    p: MatrixSym<L>,
+    x_p: MatrixAsym<1,L>
 }
 
-impl<const L: usize> UKF<L>{
-    pub fn new(alpha: f64, beta: f64, kappa: f64) -> Self{
+impl<const L: usize, const M: usize, const N: usize> UKF<L, M, N>{
+    pub fn new(alpha: f64, 
+        beta: f64, 
+        kappa: f64, 
+        F: fn(&MatrixAsym<1,L>, &MatrixAsym<1,N>,) -> MatrixAsym<1,L>,
+        q: &MatrixSym<L>, 
+        r: &MatrixSym<M>) -> Self {
 
         let lambda = alpha*alpha*(L as f64 + kappa) - L as f64;
+
+        let mut p = MatrixSym::new();
+        for i in 0..L
+        {
+            p[i][i] = f64::MAX/2.0;
+        }
 
         Self { 
             alpha,
             beta,
             kappa,
             lambda,
+            F,
             wm0: lambda/(lambda + L as f64),
             wmc0: lambda/(lambda + L as f64) + 1.0 - alpha*alpha + beta,
-            wma: [1.0/(2.0*(lambda + L as f64)); L]
+            wma: 1.0/(2.0*(lambda + L as f64)),
+            q: *q,
+            r: *r,
+            p,
+            x_p: MatrixAsym::new()
         }
+    }
+
+
+    pub fn update(&mut self, yt: &MatrixAsym<1,M>, ut: &MatrixAsym<1,N>) -> Result<(), &'static str>{
+
+        let mut s_p = self.p.chol()?;
+        s_p.scalar_prod((self.lambda + L as f64).sqrt());
+
+        let mut ones = MatrixSym::new();
+        for i in 0..L{
+            for j in 0..L{
+                ones[j][i] = self.x_p[0][i];
+            }
+        }
+        let mut chi_p_b = ones.0.clone();
+        let mut chi_p_c = ones.0.clone();
+        chi_p_b.add(&s_p);
+        chi_p_c.sub(&s_p);
+
+        let mut chi_m_b: MatrixAsym<L, L> = MatrixAsym::new();
+        let mut chi_m_c: MatrixAsym<L, L> = MatrixAsym::new();
+
+        for j in 0..L{
+            let mut  temp_in: MatrixAsym<1, L> = MatrixAsym::new();
+            for i in 0..L{
+                temp_in[0][i] = (*chi_p_b)[i][j];
+            }
+            let temp_out = (self.F)(&temp_in, ut);
+            for i in 0..L{
+                (*chi_m_b)[i][j] = temp_out[0][i];
+            }
+        }
+
+        for j in 0..L{
+            let mut  temp_in: MatrixAsym<1, L> = MatrixAsym::new();
+            for i in 0..L{
+                temp_in[0][i] = (*chi_p_c)[i][j];
+            }
+            let temp_out = (self.F)(&temp_in, ut);
+            for i in 0..L{
+                (*chi_m_c)[i][j] = temp_out[0][i];
+            }
+        }
+
+        let mut x_m = (self.F)(&self.x_p, ut);
+        x_m.scalar_prod(self.wm0);
+
+        Ok(())
     }
 }
 
