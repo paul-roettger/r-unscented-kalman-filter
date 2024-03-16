@@ -21,7 +21,7 @@ impl<const M: usize, const N: usize> MatrixAsym<M,N>{
         Self { val: [[0.0; M];N] }
     }
 
-    pub fn add(&mut self, b: &MatrixAsym<M,N>) -> &Self{
+    pub fn add(&mut self, b: &MatrixAsym<M,N>) -> &mut Self{
         for (linea, lineb) in self.deref_mut().iter_mut().zip(b.deref().iter()){
             for (a,b) in linea.iter_mut().zip(lineb.iter()){
                 *a += *b;
@@ -30,7 +30,7 @@ impl<const M: usize, const N: usize> MatrixAsym<M,N>{
         self
     }
 
-    pub fn sub(&mut self, b: &MatrixAsym<M,N>) -> &Self{
+    pub fn sub(&mut self, b: &MatrixAsym<M,N>) -> &mut Self{
         for (linea, lineb) in self.deref_mut().iter_mut().zip(b.deref().iter()){
             for (a,b) in linea.iter_mut().zip(lineb.iter()){
                 *a -= *b;
@@ -55,7 +55,28 @@ impl<const M: usize, const N: usize> MatrixAsym<M,N>{
         result
     }
 
-    pub fn scalar_prod(&mut self, b: f64) -> &Self{
+    pub fn self_mult_selft<const U: usize>(&self) -> MatrixSym<N>{
+
+        let a: MatrixAsym<M,N> = MatrixAsym::new();
+        let b: MatrixAsym<N,M> = MatrixAsym::new();
+        let c = a.mult(&b);
+
+        let mut result = MatrixSym::new();
+        let mut sum;
+        for i in 0..N {
+            for j in 0..=i {
+                sum = 0.0;
+                for k in 0..M {
+                    sum += self[i][k] * b[j][k];
+                }
+                result[i][j] = sum;
+                result[j][i] = sum;
+            }
+        }
+        result
+    }
+
+    pub fn scalar_prod(&mut self, b: f64) -> &mut Self{
         for line in self.deref_mut().iter_mut(){
             for value in line.iter_mut(){
                 *value *= b;
@@ -63,6 +84,17 @@ impl<const M: usize, const N: usize> MatrixAsym<M,N>{
         }
         self
     }
+
+    pub fn transpose(&self) -> MatrixAsym<N,M>{
+        let mut result = MatrixAsym::new();
+        for i in 0..M {
+            for j in 0..N {
+                result[i][j] = self[j][i];
+            }
+        }
+        result
+    }
+
 }
 
 impl<const M: usize, const N: usize> Deref for MatrixAsym<M,N>
@@ -102,7 +134,7 @@ impl<const M: usize> MatrixSym<M>{
         Self { 0: MatrixAsym::new() }
     }
 
-    pub fn b_mul_self_mult_bt<const U: usize>(&self, b: &MatrixAsym<M,U>) -> MatrixSym<U>{
+    pub fn b_mult_self_mult_bt<const U: usize>(&self, b: &MatrixAsym<M,U>) -> MatrixSym<U>{
         let mut result = MatrixSym::new();
         let mut tmp = [[0.0; M]; U];
         let mut sum;
@@ -230,7 +262,8 @@ struct UKF<const L: usize, const M: usize, const N: usize> {
     pub beta: f64,
     pub kappa: f64,
     pub lambda: f64,
-    F: fn(&MatrixAsym<1,L>, &MatrixAsym<1,N>,) -> MatrixAsym<1,L>,
+    f_sys: fn(&MatrixAsym<1,L>, &MatrixAsym<1,N>) -> MatrixAsym<1,L>,
+    h_sys: fn(&MatrixAsym<1,L>) -> MatrixAsym<1,M>,
     wmc0: f64,
     wm0: f64,
     wma: f64,
@@ -244,7 +277,8 @@ impl<const L: usize, const M: usize, const N: usize> UKF<L, M, N>{
     pub fn new(alpha: f64, 
         beta: f64, 
         kappa: f64, 
-        F: fn(&MatrixAsym<1,L>, &MatrixAsym<1,N>,) -> MatrixAsym<1,L>,
+        f_sys: fn(&MatrixAsym<1,L>, &MatrixAsym<1,N>,) -> MatrixAsym<1,L>,
+        h_sys: fn(&MatrixAsym<1,L>) -> MatrixAsym<1,M>,
         q: &MatrixSym<L>, 
         r: &MatrixSym<M>) -> Self {
 
@@ -261,7 +295,8 @@ impl<const L: usize, const M: usize, const N: usize> UKF<L, M, N>{
             beta,
             kappa,
             lambda,
-            F,
+            f_sys,
+            h_sys,
             wm0: lambda/(lambda + L as f64),
             wmc0: lambda/(lambda + L as f64) + 1.0 - alpha*alpha + beta,
             wma: 1.0/(2.0*(lambda + L as f64)),
@@ -289,18 +324,22 @@ impl<const L: usize, const M: usize, const N: usize> UKF<L, M, N>{
         chi_p_b.add(&s_p);
         chi_p_c.sub(&s_p);
 
-        let mut chi_m_b: MatrixAsym<L, L> = MatrixAsym::new();
-        let mut chi_m_c: MatrixAsym<L, L> = MatrixAsym::new();
+        let mut chi_m_a = (self.f_sys)(&self.x_p, ut);
+        let mut chi_m_b: [MatrixAsym<1, L> ;L] = [MatrixAsym::new(); L];
+        let mut chi_m_c: [MatrixAsym<1, L> ;L] = [MatrixAsym::new(); L];
+
+        let mut x_m = chi_m_a.clone();
+        x_m.scalar_prod(self.wm0);
 
         for j in 0..L{
             let mut  temp_in: MatrixAsym<1, L> = MatrixAsym::new();
             for i in 0..L{
                 temp_in[0][i] = (*chi_p_b)[i][j];
             }
-            let temp_out = (self.F)(&temp_in, ut);
-            for i in 0..L{
-                (*chi_m_b)[i][j] = temp_out[0][i];
-            }
+            let mut temp_out = (self.f_sys)(&temp_in, ut);
+            chi_m_b[j] = temp_out;
+
+            x_m.add(temp_out.scalar_prod(self.wma));
         }
 
         for j in 0..L{
@@ -308,14 +347,55 @@ impl<const L: usize, const M: usize, const N: usize> UKF<L, M, N>{
             for i in 0..L{
                 temp_in[0][i] = (*chi_p_c)[i][j];
             }
-            let temp_out = (self.F)(&temp_in, ut);
-            for i in 0..L{
-                (*chi_m_c)[i][j] = temp_out[0][i];
-            }
+            let mut temp_out= (self.f_sys)(&temp_in, ut);
+            chi_m_b[j] = temp_out;
+
+            x_m.add(temp_out.scalar_prod(self.wma));
         }
 
-        let mut x_m = (self.F)(&self.x_p, ut);
-        x_m.scalar_prod(self.wm0);
+        let mut p_m = self.q.clone();
+
+        p_m.0.add(&(chi_m_a.sub(&x_m)
+                           .self_mult_selft::<L>().0)
+                           .scalar_prod(self.wm0));
+
+        for j in 0..L{
+            p_m.0.add(&(chi_m_b[j].sub(&x_m)
+                                  .self_mult_selft::<L>().0)
+                                  .scalar_prod(self.wma));
+
+            p_m.0.add(&(chi_m_c[j].sub(&x_m)
+                                  .self_mult_selft::<L>().0)
+                                  .scalar_prod(self.wma));
+        }
+
+        let mut psi_m_a = MatrixAsym::new();
+        let mut psi_m_b = [MatrixAsym::new(); L];
+        let mut psi_m_c = [MatrixAsym::new(); L];
+        let mut y_m = MatrixAsym::new();
+
+        psi_m_a = (self.h_sys)(&chi_m_a);
+        y_m.add(psi_m_a.scalar_prod(self.wm0));
+
+        for i in 0..L{
+            psi_m_b[i] = (self.h_sys)(&chi_m_b[i]);
+            psi_m_c[i] = (self.h_sys)(&chi_m_c[i]);
+            y_m.add(psi_m_b[i].scalar_prod(self.wm0));
+            y_m.add(psi_m_c[i].scalar_prod(self.wm0));
+        }
+
+        let mut p_yy = self.r.clone();
+        let mut p_xy =  MatrixAsym::new();
+
+        p_yy.0.add(psi_m_a.clone()
+                           .sub(&y_m)
+                           .self_mult_selft::<M>().0
+                           .scalar_prod(self.wmc0));
+
+        let a = psi_m_a.clone().sub(&y_m).transpose();
+        let b = chi_m_a.clone().sub(&x_m).transpose();
+        let c = a.mult(b);
+        p_xy.add(chi_m_a.clone().sub(&x_m).mult(&psi_m_a.clone().sub(&y_m).transpose()));
 
         Ok(())
     }
@@ -382,7 +462,7 @@ mod tests {
                 [2.0,2.0],
                 [3.0,1.0]];
 
-        let d = a.b_mul_self_mult_bt(&b);
+        let d = a.b_mult_self_mult_bt(&b);
         print!("{}\n",d); 
 
         let tmp = b.mult(&(a.0));
