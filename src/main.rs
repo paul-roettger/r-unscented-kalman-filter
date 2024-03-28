@@ -1,7 +1,5 @@
 use std::ops::{DerefMut, Deref};
 use std::{fmt, vec};
-use std::convert::From;
-use futures::executor::block_on;
 
 fn main() {
     println!("Hello, world!");
@@ -230,6 +228,20 @@ impl<const M: usize> MatrixSym<M>{
         Ok(result)
     }
 
+    pub fn sub(&mut self, b: &MatrixSym<M>) -> &mut Self{
+        for (linea, lineb) in self.deref_mut().iter_mut().zip(b.deref().iter()){
+            for (a,b) in linea.iter_mut().zip(lineb.iter()){
+                *a -= *b;
+            }
+        }
+        for i in 0..M{
+            for j in 0..=i{
+                self[i][j] -= b[i][j];
+                self[j][i] = self[i][j];
+            }
+        }
+        self
+    }
 
 }
 
@@ -277,18 +289,14 @@ impl<const L: usize, const M: usize, const N: usize> UKF<L, M, N>{
     pub fn new(alpha: f64, 
         beta: f64, 
         kappa: f64, 
-        f_sys: fn(&MatrixAsym<1,L>, &MatrixAsym<1,N>,) -> MatrixAsym<1,L>,
+        f_sys: fn(&MatrixAsym<1,L>, &MatrixAsym<1,N>) -> MatrixAsym<1,L>,
         h_sys: fn(&MatrixAsym<1,L>) -> MatrixAsym<1,M>,
+        x_start: &MatrixAsym<1,L>,
+        p_start: &MatrixSym<L>, 
         q: &MatrixSym<L>, 
         r: &MatrixSym<M>) -> Self {
 
         let lambda = alpha*alpha*(L as f64 + kappa) - L as f64;
-
-        let mut p = MatrixSym::new();
-        for i in 0..L
-        {
-            p[i][i] = f64::MAX/2.0;
-        }
 
         Self { 
             alpha,
@@ -302,8 +310,8 @@ impl<const L: usize, const M: usize, const N: usize> UKF<L, M, N>{
             wma: 1.0/(2.0*(lambda + L as f64)),
             q: *q,
             r: *r,
-            p,
-            x_p: MatrixAsym::new()
+            p: *p_start,
+            x_p: *x_start
         }
     }
 
@@ -369,7 +377,7 @@ impl<const L: usize, const M: usize, const N: usize> UKF<L, M, N>{
                                   .scalar_prod(self.wma));
         }
 
-        let mut psi_m_a = MatrixAsym::new();
+        let mut psi_m_a ;
         let mut psi_m_b = [MatrixAsym::new(); L];
         let mut psi_m_c = [MatrixAsym::new(); L];
         let mut y_m = MatrixAsym::new();
@@ -391,11 +399,41 @@ impl<const L: usize, const M: usize, const N: usize> UKF<L, M, N>{
                            .sub(&y_m)
                            .self_mult_selft::<M>().0
                            .scalar_prod(self.wmc0));
+        p_xy.add(&chi_m_a.clone()
+                         .sub(&x_m)
+                         .scalar_prod(self.wmc0)
+                         .mult(&psi_m_a.clone()
+                                        .sub(&y_m)
+                                        .transpose()));
+        for i in 0..L{
+            p_yy.0.add(psi_m_b[i].clone()
+                                 .sub(&y_m)
+                                 .self_mult_selft::<M>().0
+                                 .scalar_prod(self.wma));
+            p_xy.add(&chi_m_b[i].clone()
+                                .sub(&x_m)
+                                .scalar_prod(self.wma)
+                                .mult(&psi_m_b[i].clone()
+                                                 .sub(&y_m)
+                                                 .transpose()));
 
-        let a = psi_m_a.clone().sub(&y_m).transpose();
-        let b = chi_m_a.clone().sub(&x_m).transpose();
-        let c = a.mult(b);
-        p_xy.add(chi_m_a.clone().sub(&x_m).mult(&psi_m_a.clone().sub(&y_m).transpose()));
+            p_yy.0.add(psi_m_c[i].clone()
+                                 .sub(&y_m)
+                                 .self_mult_selft::<M>().0
+                                 .scalar_prod(self.wma));
+            p_xy.add(&chi_m_c[i].clone()
+                                .sub(&x_m)
+                                .scalar_prod(self.wma)
+                                .mult(&psi_m_c[i].clone()
+                                                 .sub(&y_m)
+                                                 .transpose()));
+        }
+
+
+        // Step 4. Measurement update
+        let k = p_yy.chol_solve(&p_xy.transpose())?.transpose();
+        self.x_p.add(&k.mult(&yt.clone().sub(&y_m)));
+        self.p = *p_m.sub(&p_yy.b_mult_self_mult_bt(&k));
 
         Ok(())
     }
@@ -404,7 +442,9 @@ impl<const L: usize, const M: usize, const N: usize> UKF<L, M, N>{
 #[cfg(test)]
 mod tests {
 
-    use crate::{MatrixAsym, MatrixSym};
+    use crate::{MatrixAsym, MatrixSym, UKF};
+    use rand::distributions::{Distribution, Uniform, Standard};
+
 
     #[test]
     fn add_test() {
@@ -478,11 +518,139 @@ mod tests {
                 [1.0,9.0]];
 
         let mut b = MatrixAsym::new();
-        *b =   [[1.0, 0.0],
-                [0.0, 1.0]];
+        *b =   [[1.0],
+                [0.0]];
 
         let b = a.chol_solve(&b).unwrap();
         print!("{}\n",b); 
+
+    }
+
+    #[test]
+    fn matrix_chol() {
+        let mut a = MatrixSym::new();
+        *a =   [[2.0, 0.0],
+                [0.0,9.0]];
+
+        let b = a.chol().unwrap();
+        print!("{} * {} = {}\n",b, b.transpose(), b.mult(&b.transpose())); 
+
+    }
+
+    fn ukf_test_f_sys(x: &MatrixAsym<1,4>, u: &MatrixAsym<1,0>) -> MatrixAsym<1,4>
+    {
+        let t = 0.1;
+        let mut f_sys = MatrixAsym::new();
+        *f_sys = [[1.0, 0.0,   t, 0.0],
+                  [0.0, 1.0, 0.0,   t],
+                  [0.0, 0.0, 1.0, 0.0],
+                  [0.0, 0.0, 0.0, 0.0]];
+        f_sys.mult(x)
+    }
+
+    fn ukf_test_h_sys(x: &MatrixAsym<1,4>) -> MatrixAsym<1,2>
+    {
+        let n1 = 20.0;
+        let n2 = 0.0;
+        let e1 = 0.0; 
+        let e2 = 20.0;
+        let mut result = MatrixAsym::new();
+        result[0][0] = ((x[0][0] - n1).powi(2) + (x[0][1] - e1).powi(2)).sqrt();
+        result[0][1] = ((x[0][0] - n2).powi(2) + (x[0][1] - e2).powi(2)).sqrt();
+        result
+    }
+
+    #[test]
+    fn ukf_test() {
+        let t_samplesize = 500;
+
+        let mut x_start = MatrixAsym::new();
+        *x_start  = [[0.0],
+                     [0.0],
+                     [50.0],
+                     [50.0]];
+        let mut p_start = MatrixSym::new();
+        *p_start = [[1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0]];
+
+        let mut q = MatrixSym::new();
+        *q = [[0.0, 0.0, 0.0, 0.0],
+              [0.0, 0.0, 0.0, 0.0],
+              [0.0, 0.0, 4.0, 0.0],
+              [0.0, 0.0, 0.0, 4.0]];
+
+        let mut r = MatrixSym::new();
+        *r = [[1.0, 0.0],
+              [0.0, 1.0]];
+
+        let distr = rand::distributions::Standard;
+        let sqrt_q = q.chol().unwrap();
+        let sqrt_r = r.chol().unwrap();
+        let sqrt_p = p_start.chol().unwrap();
+
+        let w_t = distr.sample_iter(rand::thread_rng())
+                                              .take(t_samplesize)
+                                              .map(|(w1, w2, w3, w4)| {
+                                                  let mut v = MatrixAsym::new();
+                                                  *v = [[w1],
+                                                      [w2],
+                                                      [w3],
+                                                      [w4]];
+                                                  sqrt_q.mult(&v)
+                                              })
+                                              .collect::<Vec<_>>();
+
+        let v_t = distr.sample_iter(rand::thread_rng())
+                                              .take(t_samplesize)
+                                              .map(|(v1, v2)| {
+                                                  let mut v = MatrixAsym::new();
+                                                  *v = [[v1],
+                                                        [v2]];
+                                                  sqrt_r.mult(&v)
+                                              })
+                                              .collect::<Vec<_>>();
+
+        let mut x_t = distr.sample_iter(rand::thread_rng())
+                                                  .take(1)
+                                                  .map(|(v1, v2, v3, v4)| {
+                                                      let mut v = MatrixAsym::new();
+                                                      *v = [[v1],
+                                                          [v2],
+                                                          [v3],
+                                                          [v4]];
+                                                      *sqrt_p.mult(&v)
+                                                             .add(&x_start)
+                                                  })
+                                                  .collect::<Vec<_>>();
+
+        let u = MatrixAsym::new();
+        for i in 0..t_samplesize-1{
+            x_t.push(*ukf_test_f_sys(&x_t[i], &u).add(&w_t[i]))
+        }
+
+        let mut y_t = vec![];
+        for (x, v) in x_t.iter().zip(v_t.iter()){
+            y_t.push(*ukf_test_h_sys(x).add(v));
+        }
+
+
+        let mut ukf = UKF::new(1.0,
+                                              2.0,
+                                             0.0, 
+                                                    ukf_test_f_sys, 
+                                                    ukf_test_h_sys, 
+                                                    &x_start, 
+                                                    &p_start, 
+                                                    &q, 
+                                                    &r);
+
+        let mut x_ukf = vec![];
+        for y in y_t.iter(){
+            ukf.update(y, &u).unwrap();
+            x_ukf.push(ukf.x_p);
+        }
 
     }
 
