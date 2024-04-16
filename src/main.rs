@@ -55,17 +55,13 @@ impl<const M: usize, const N: usize> MatrixAsym<M,N>{
 
     pub fn self_mult_selft<const U: usize>(&self) -> MatrixSym<N>{
 
-        let a: MatrixAsym<M,N> = MatrixAsym::new();
-        let b: MatrixAsym<N,M> = MatrixAsym::new();
-        let c = a.mult(&b);
-
         let mut result = MatrixSym::new();
         let mut sum;
         for i in 0..N {
             for j in 0..=i {
                 sum = 0.0;
                 for k in 0..M {
-                    sum += self[i][k] * b[j][k];
+                    sum += self[i][k] * self[j][k];
                 }
                 result[i][j] = sum;
                 result[j][i] = sum;
@@ -229,14 +225,29 @@ impl<const M: usize> MatrixSym<M>{
     }
 
     pub fn sub(&mut self, b: &MatrixSym<M>) -> &mut Self{
-        for (linea, lineb) in self.deref_mut().iter_mut().zip(b.deref().iter()){
-            for (a,b) in linea.iter_mut().zip(lineb.iter()){
-                *a -= *b;
-            }
-        }
         for i in 0..M{
             for j in 0..=i{
                 self[i][j] -= b[i][j];
+                self[j][i] = self[i][j];
+            }
+        }
+        self
+    }
+
+    pub fn add(&mut self, b: &MatrixSym<M>) -> &mut Self{
+        for i in 0..M{
+            for j in 0..=i{
+                self[i][j] += b[i][j];
+                self[j][i] = self[i][j];
+            }
+        }
+        self
+    }
+
+    pub fn scalar_prod(&mut self, b: f64) -> &mut Self{
+        for i in 0..M{
+            for j in 0..=i{
+                self[i][j] *= b;
                 self[j][i] = self[i][j];
             }
         }
@@ -270,10 +281,10 @@ impl<const M: usize> fmt::Display for MatrixSym<M>{
 
 
 struct UKF<const L: usize, const M: usize, const N: usize> {
-    pub alpha: f64,
-    pub beta: f64,
-    pub kappa: f64,
-    pub lambda: f64,
+    alpha: f64,
+    beta: f64,
+    kappa: f64,
+    lambda: f64,
     f_sys: fn(&MatrixAsym<1,L>, &MatrixAsym<1,N>) -> MatrixAsym<1,L>,
     h_sys: fn(&MatrixAsym<1,L>) -> MatrixAsym<1,M>,
     wmc0: f64,
@@ -296,7 +307,7 @@ impl<const L: usize, const M: usize, const N: usize> UKF<L, M, N>{
         q: &MatrixSym<L>, 
         r: &MatrixSym<M>) -> Self {
 
-        let lambda = alpha*alpha*(L as f64 + kappa) - L as f64;
+        let lambda = (alpha*alpha*(L as f64 + kappa)) - L as f64;
 
         Self { 
             alpha,
@@ -318,122 +329,152 @@ impl<const L: usize, const M: usize, const N: usize> UKF<L, M, N>{
 
     pub fn update(&mut self, yt: &MatrixAsym<1,M>, ut: &MatrixAsym<1,N>) -> Result<(), &'static str>{
 
-        let mut s_p = self.p.chol()?;
-        s_p.scalar_prod((self.lambda + L as f64).sqrt());
+        // Step 1 Generate Sigma points
+        let (chi_p_b, chi_p_c) = {
+            let mut s_p = self.p.chol()?;
+            s_p.scalar_prod((self.lambda + L as f64).sqrt());
 
-        let mut ones = MatrixSym::new();
-        for i in 0..L{
-            for j in 0..L{
-                ones[j][i] = self.x_p[0][i];
+            let mut chi_p_b = [MatrixAsym::new(); L];
+            let mut chi_p_c = [MatrixAsym::new(); L];
+            for j in 0..L
+            {
+                let mut temp_in: MatrixAsym<1, L> = MatrixAsym::new();
+                for i in 0..L{
+                    temp_in[i][0] = (*s_p)[i][j];
+                }
+                chi_p_b[j] = *self.x_p.add(&temp_in);
+                chi_p_c[j] = *self.x_p.sub(&temp_in);
             }
-        }
-        let mut chi_p_b = ones.0.clone();
-        let mut chi_p_c = ones.0.clone();
-        chi_p_b.add(&s_p);
-        chi_p_c.sub(&s_p);
 
-        let mut chi_m_a = (self.f_sys)(&self.x_p, ut);
-        let mut chi_m_b: [MatrixAsym<1, L> ;L] = [MatrixAsym::new(); L];
-        let mut chi_m_c: [MatrixAsym<1, L> ;L] = [MatrixAsym::new(); L];
+            (chi_p_b, chi_p_c)
+        };
 
-        let mut x_m = chi_m_a.clone();
-        x_m.scalar_prod(self.wm0);
+        //Step 2: Prediction of Transformation
+        let (chi_m_a, chi_m_b, chi_m_c, x_m) = {
 
-        for j in 0..L{
-            let mut  temp_in: MatrixAsym<1, L> = MatrixAsym::new();
-            for i in 0..L{
-                temp_in[0][i] = (*chi_p_b)[i][j];
+            let chi_m_a = (self.f_sys)(&self.x_p, ut);
+            let mut chi_m_b: [MatrixAsym<1, L> ;L] = [MatrixAsym::new(); L];
+            let mut chi_m_c: [MatrixAsym<1, L> ;L] = [MatrixAsym::new(); L];
+
+            let mut x_m = chi_m_a.clone();
+            x_m.scalar_prod(self.wm0);
+
+            for ((c_m_b, c_m_c), 
+                (c_p_b, c_p_c)) 
+                    in chi_m_b.iter_mut().zip(chi_m_c.iter_mut())
+                                        .zip(chi_p_b.iter().zip(chi_p_c.iter())){
+                *c_m_b = (self.f_sys)(c_p_b, ut);
+                *c_m_c = (self.f_sys)(c_p_c, ut);
+                x_m.add(c_m_b.clone().scalar_prod(self.wma));
+                x_m.add(c_m_c.clone().scalar_prod(self.wma));
             }
-            let mut temp_out = (self.f_sys)(&temp_in, ut);
-            chi_m_b[j] = temp_out;
+            (chi_m_a, chi_m_b, chi_m_c, x_m)
+        };
 
-            x_m.add(temp_out.scalar_prod(self.wma));
-        }
+        let p_m = {
 
-        for j in 0..L{
-            let mut  temp_in: MatrixAsym<1, L> = MatrixAsym::new();
-            for i in 0..L{
-                temp_in[0][i] = (*chi_p_c)[i][j];
-            }
-            let mut temp_out= (self.f_sys)(&temp_in, ut);
-            chi_m_b[j] = temp_out;
+            let mut p_m = self.q.clone();
 
-            x_m.add(temp_out.scalar_prod(self.wma));
-        }
+            p_m.add(&(chi_m_a.clone().sub(&x_m)
+                            .self_mult_selft::<L>())
+                            .scalar_prod(self.wmc0));
 
-        let mut p_m = self.q.clone();
-
-        p_m.0.add(&(chi_m_a.sub(&x_m)
-                           .self_mult_selft::<L>().0)
-                           .scalar_prod(self.wm0));
-
-        for j in 0..L{
-            p_m.0.add(&(chi_m_b[j].sub(&x_m)
-                                  .self_mult_selft::<L>().0)
-                                  .scalar_prod(self.wma));
-
-            p_m.0.add(&(chi_m_c[j].sub(&x_m)
-                                  .self_mult_selft::<L>().0)
-                                  .scalar_prod(self.wma));
-        }
-
-        let mut psi_m_a ;
-        let mut psi_m_b = [MatrixAsym::new(); L];
-        let mut psi_m_c = [MatrixAsym::new(); L];
-        let mut y_m = MatrixAsym::new();
-
-        psi_m_a = (self.h_sys)(&chi_m_a);
-        y_m.add(psi_m_a.scalar_prod(self.wm0));
-
-        for i in 0..L{
-            psi_m_b[i] = (self.h_sys)(&chi_m_b[i]);
-            psi_m_c[i] = (self.h_sys)(&chi_m_c[i]);
-            y_m.add(psi_m_b[i].scalar_prod(self.wm0));
-            y_m.add(psi_m_c[i].scalar_prod(self.wm0));
-        }
-
-        let mut p_yy = self.r.clone();
-        let mut p_xy =  MatrixAsym::new();
-
-        p_yy.0.add(psi_m_a.clone()
-                           .sub(&y_m)
-                           .self_mult_selft::<M>().0
-                           .scalar_prod(self.wmc0));
-        p_xy.add(&chi_m_a.clone()
-                         .sub(&x_m)
-                         .scalar_prod(self.wmc0)
-                         .mult(&psi_m_a.clone()
-                                        .sub(&y_m)
-                                        .transpose()));
-        for i in 0..L{
-            p_yy.0.add(psi_m_b[i].clone()
-                                 .sub(&y_m)
-                                 .self_mult_selft::<M>().0
-                                 .scalar_prod(self.wma));
-            p_xy.add(&chi_m_b[i].clone()
+            for (c_m_b, c_m_c) in chi_m_b.iter().zip(chi_m_c.iter()){
+                p_m.add((*c_m_b).clone()
                                 .sub(&x_m)
-                                .scalar_prod(self.wma)
-                                .mult(&psi_m_b[i].clone()
-                                                 .sub(&y_m)
-                                                 .transpose()));
+                                .self_mult_selft::<L>()
+                                .scalar_prod(self.wma));
 
-            p_yy.0.add(psi_m_c[i].clone()
-                                 .sub(&y_m)
-                                 .self_mult_selft::<M>().0
-                                 .scalar_prod(self.wma));
-            p_xy.add(&chi_m_c[i].clone()
+                p_m.add((*c_m_c).clone()
                                 .sub(&x_m)
-                                .scalar_prod(self.wma)
-                                .mult(&psi_m_c[i].clone()
-                                                 .sub(&y_m)
-                                                 .transpose()));
-        }
+                                .self_mult_selft::<L>()
+                                .scalar_prod(self.wma));
+            }
 
+            p_m
+        };
+
+
+        // Step 3: Opvervation transformation
+        let (psi_m_a, psi_m_b, psi_m_c, y_m) = {
+            let psi_m_a ;
+            let mut psi_m_b = [MatrixAsym::new(); L];
+            let mut psi_m_c = [MatrixAsym::new(); L];
+            let mut y_m = MatrixAsym::new();
+
+            psi_m_a = (self.h_sys)(&chi_m_a);
+            y_m.add(psi_m_a.clone().scalar_prod(self.wm0));
+
+            for ((c_m_b, c_m_c), 
+                (p_m_b, p_m_c)) in 
+                        chi_m_b.iter().zip(chi_m_c.iter()).zip(psi_m_b.iter_mut().zip(psi_m_c.iter_mut())){
+                *p_m_b = (self.h_sys)(c_m_b);
+                *p_m_c = (self.h_sys)(c_m_c);
+                y_m.add((*p_m_b).clone().scalar_prod(self.wma));
+                y_m.add((*p_m_c).clone().scalar_prod(self.wma));
+            }
+            (psi_m_a, psi_m_b, psi_m_c, y_m)
+        };
+
+        let (p_yy, p_xy) = {
+            let mut p_yy = self.r.clone();
+            let mut p_xy =  MatrixAsym::new();
+
+            p_yy.add(psi_m_a.clone()
+                            .sub(&y_m)
+                            .self_mult_selft::<M>()
+                            .scalar_prod(self.wmc0));
+            p_xy.add(&chi_m_a.clone()
+                            .sub(&x_m)
+                            .scalar_prod(self.wmc0)
+                            .mult(&psi_m_a.clone()
+                                            .sub(&y_m)
+                                            .transpose()));
+            for ((c_m_b, c_m_c), 
+                (p_m_b, p_m_c)) in 
+                chi_m_b.iter().zip(chi_m_c.iter()).zip(psi_m_b.iter().zip(psi_m_c.iter())){
+                p_yy.add((*p_m_b).clone()
+                                    .sub(&y_m)
+                                    .self_mult_selft::<M>()
+                                    .scalar_prod(self.wma));
+                p_xy.add(&(*c_m_b).clone()
+                                    .sub(&x_m)
+                                    .scalar_prod(self.wma)
+                                    .mult(&(*p_m_b).clone()
+                                                    .sub(&y_m)
+                                                    .transpose()));
+
+                p_yy.add((*p_m_c).clone()
+                                    .sub(&y_m)
+                                    .self_mult_selft::<M>()
+                                    .scalar_prod(self.wma));
+                p_xy.add(&(*c_m_c).clone()
+                                    .sub(&x_m)
+                                    .scalar_prod(self.wma)
+                                    .mult(&(*p_m_c).clone()
+                                                    .sub(&y_m)
+                                                    .transpose()));
+            }
+
+            (p_yy, p_xy)
+        };
 
         // Step 4. Measurement update
-        let k = p_yy.chol_solve(&p_xy.transpose())?.transpose();
+        let mut zeros: MatrixAsym<M,M> = MatrixAsym::new();
+        for (i, line) in zeros.iter_mut().enumerate(){
+            for (j, value) in line.iter_mut().enumerate(){
+                if i == j{
+                    *value = 1.0;
+                }
+                else {
+                    *value = 0.0;    
+                }
+            }
+        }
+        let k = p_xy.mult(&p_yy.chol_solve(&zeros)?);
         self.x_p.add(&k.mult(&yt.clone().sub(&y_m)));
-        self.p = *p_m.sub(&p_yy.b_mult_self_mult_bt(&k));
+        let tmp = p_yy.b_mult_self_mult_bt(&k);
+        self.p = *p_m.clone().sub(&tmp);
 
         Ok(())
     }
@@ -529,7 +570,7 @@ mod tests {
     #[test]
     fn matrix_chol() {
         let mut a = MatrixSym::new();
-        *a =   [[2.0, 0.0],
+        *a =   [[1.0, 0.0],
                 [0.0,9.0]];
 
         let b = a.chol().unwrap();
@@ -537,14 +578,14 @@ mod tests {
 
     }
 
-    fn ukf_test_f_sys(x: &MatrixAsym<1,4>, u: &MatrixAsym<1,0>) -> MatrixAsym<1,4>
+    fn ukf_test_f_sys(x: &MatrixAsym<1,4>, _u: &MatrixAsym<1,0>) -> MatrixAsym<1,4>
     {
         let t = 0.1;
         let mut f_sys = MatrixAsym::new();
         *f_sys = [[1.0, 0.0,   t, 0.0],
                   [0.0, 1.0, 0.0,   t],
                   [0.0, 0.0, 1.0, 0.0],
-                  [0.0, 0.0, 0.0, 0.0]];
+                  [0.0, 0.0, 0.0, 1.0]];
         f_sys.mult(x)
     }
 
@@ -555,8 +596,8 @@ mod tests {
         let e1 = 0.0; 
         let e2 = 20.0;
         let mut result = MatrixAsym::new();
-        result[0][0] = ((x[0][0] - n1).powi(2) + (x[0][1] - e1).powi(2)).sqrt();
-        result[0][1] = ((x[0][0] - n2).powi(2) + (x[0][1] - e2).powi(2)).sqrt();
+        result[0][0] = ((x[0][0] - n1).powi(2) + (x[1][0] - e1).powi(2)).sqrt();
+        result[1][0] = ((x[0][0] - n2).powi(2) + (x[1][0] - e2).powi(2)).sqrt();
         result
     }
 
@@ -585,11 +626,41 @@ mod tests {
         *r = [[1.0, 0.0],
               [0.0, 1.0]];
 
-        let distr = rand::distributions::Standard;
-        let sqrt_q = q.chol().unwrap();
-        let sqrt_r = r.chol().unwrap();
-        let sqrt_p = p_start.chol().unwrap();
+        let mut sqrt_q = q.0.clone();
+        let mut sqrt_r = r.0.clone();
+        let mut sqrt_p = p_start.0.clone();
+        for i in 0..4{
+            for j in 0..4{
+                if i == j{
+                    sqrt_q[i][j] = sqrt_q[i][j].sqrt();
+                }
+                else {
+                    sqrt_q[i][j] = 0.0;
+                }
+            }
+        }
+        for i in 0..2{
+            for j in 0..2{
+                if i == j{
+                    sqrt_r[i][j] = sqrt_r[i][j].sqrt();
+                }
+                else {
+                    sqrt_r[i][j] = 0.0;
+                }
+            }
+        }
+        for i in 0..4{
+            for j in 0..4{
+                if i == j{
+                    sqrt_p[i][j] = sqrt_p[i][j].sqrt();
+                }
+                else {
+                    sqrt_p[i][j] = 0.0;
+                }
+            }
+        }
 
+        let distr = rand::distributions::Standard;
         let w_t = distr.sample_iter(rand::thread_rng())
                                               .take(t_samplesize)
                                               .map(|(w1, w2, w3, w4)| {
