@@ -1,5 +1,5 @@
 use std::ops::{DerefMut, Deref};
-use std::{fmt, vec};
+use std::fmt;
 
 fn main() {
     println!("Hello, world!");
@@ -190,7 +190,7 @@ impl<const M: usize> MatrixSym<M>{
         let mut m_y = [[0.0;U];M];
         let mut sum;
 
-        let mut m_l = self.chol()?;
+        let m_l = self.chol()?;
 
         /* forward substitution */
         for i in 0..U{
@@ -281,9 +281,6 @@ impl<const M: usize> fmt::Display for MatrixSym<M>{
 
 
 struct UKF<const L: usize, const M: usize, const N: usize> {
-    alpha: f64,
-    beta: f64,
-    kappa: f64,
     lambda: f64,
     f_sys: fn(&MatrixAsym<1,L>, &MatrixAsym<1,N>) -> MatrixAsym<1,L>,
     h_sys: fn(&MatrixAsym<1,L>) -> MatrixAsym<1,M>,
@@ -310,9 +307,6 @@ impl<const L: usize, const M: usize, const N: usize> UKF<L, M, N>{
         let lambda = (alpha*alpha*(L as f64 + kappa)) - L as f64;
 
         Self { 
-            alpha,
-            beta,
-            kappa,
             lambda,
             f_sys,
             h_sys,
@@ -342,8 +336,8 @@ impl<const L: usize, const M: usize, const N: usize> UKF<L, M, N>{
                 for i in 0..L{
                     temp_in[i][0] = (*s_p)[i][j];
                 }
-                chi_p_b[j] = *self.x_p.add(&temp_in);
-                chi_p_c[j] = *self.x_p.sub(&temp_in);
+                chi_p_b[j] = *self.x_p.clone().add(&temp_in);
+                chi_p_c[j] = *self.x_p.clone().sub(&temp_in);
             }
 
             (chi_p_b, chi_p_c)
@@ -472,9 +466,8 @@ impl<const L: usize, const M: usize, const N: usize> UKF<L, M, N>{
             }
         }
         let k = p_xy.mult(&p_yy.chol_solve(&zeros)?);
-        self.x_p.add(&k.mult(&yt.clone().sub(&y_m)));
-        let tmp = p_yy.b_mult_self_mult_bt(&k);
-        self.p = *p_m.clone().sub(&tmp);
+        self.x_p = *k.mult(&yt.clone().sub(&y_m)).add(&x_m);
+        self.p = *p_m.clone().sub(&p_yy.b_mult_self_mult_bt(&k));
 
         Ok(())
     }
@@ -484,7 +477,8 @@ impl<const L: usize, const M: usize, const N: usize> UKF<L, M, N>{
 mod tests {
 
     use crate::{MatrixAsym, MatrixSym, UKF};
-    use rand::distributions::{Distribution, Uniform, Standard};
+    use rand::distributions::Distribution;
+    use csv::Writer;
 
 
     #[test]
@@ -719,10 +713,15 @@ mod tests {
 
         let mut x_ukf = vec![];
         for y in y_t.iter(){
-            ukf.update(y, &u).unwrap();
             x_ukf.push(ukf.x_p);
+            ukf.update(y, &u).unwrap();
         }
 
+        let mut wrt = Writer::from_path("foo.csv").unwrap();
+        for (x_test_ukf, x) in x_ukf.iter().zip(x_t.iter()){
+            wrt.write_record(x_test_ukf.iter().chain(x.iter()).map(|v| v[0].to_string())).unwrap();
+        }
+        wrt.flush().unwrap();
     }
 
 }
