@@ -89,6 +89,48 @@ impl<const M: usize, const N: usize> MatrixAsym<M,N>{
         result
     }
 
+
+    pub fn chol_solve(&self, b: &MatrixSym<M>) -> Result<MatrixAsym<M,N>, &'static str>{
+        let mut result = MatrixAsym::new();
+        let mut m_y = [[0.0;N];M];
+        let mut sum;
+
+        let m_l = b.chol()?;
+
+        /* forward substitution */
+        for i in 0..N{
+            for j in 0..M{
+                sum = 0.0;
+                for k in 0..j{
+                    sum += m_y[k][i] * m_l[j][k];
+                }
+                if m_l[j][j] != 0.0{
+                    m_y[j][i] = (self[i][j]-sum)/m_l[j][j];
+                }else{
+                    return Err("Div 0");
+                }
+            }
+        }
+
+        /* back substitution */
+        for i in 0..N{
+            for j in (0..M).rev(){
+                sum = 0.0;
+                for k in (j..M).rev(){
+                    sum += result[i][k] * m_l[k][j];
+                }
+                if m_l[j][j] != 0.0{
+                    result[i][j] = (m_y[j][i]-sum)/m_l[j][j];
+                }else{
+                    return Err("Div 0");
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    
+
 }
 
 impl<const M: usize, const N: usize> Deref for MatrixAsym<M,N>
@@ -454,18 +496,7 @@ impl<const L: usize, const M: usize, const N: usize> UKF<L, M, N>{
         };
 
         // Step 4. Measurement update
-        let mut zeros: MatrixAsym<M,M> = MatrixAsym::new();
-        for (i, line) in zeros.iter_mut().enumerate(){
-            for (j, value) in line.iter_mut().enumerate(){
-                if i == j{
-                    *value = 1.0;
-                }
-                else {
-                    *value = 0.0;    
-                }
-            }
-        }
-        let k = p_xy.mult(&p_yy.chol_solve(&zeros)?);
+        let k = p_xy.chol_solve(&p_yy)?;
         self.x_p = *k.mult(&yt.clone().sub(&y_m)).add(&x_m);
         self.p = *p_m.clone().sub(&p_yy.b_mult_self_mult_bt(&k));
 
@@ -553,11 +584,16 @@ mod tests {
                 [1.0,9.0]];
 
         let mut b = MatrixAsym::new();
-        *b =   [[1.0],
-                [0.0]];
+        *b =   [[3.0, 1.0]];
 
-        let b = a.chol_solve(&b).unwrap();
-        print!("{}\n",b); 
+                let mut i = MatrixAsym::new();
+        *i =   [[1.0, 0.0],
+                [0.0, 1.0]];
+
+        let c = b.mult(&a.chol_solve(&i).unwrap());
+        let d = b.chol_solve(&a).unwrap();
+        print!("{}\n",c);
+        print!("{}\n",d); 
 
     }
 
