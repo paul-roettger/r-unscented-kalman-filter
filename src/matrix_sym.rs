@@ -163,3 +163,71 @@ impl<const M: usize> fmt::Display for MatrixSym<M>{
         self.0.fmt(f)
     }
 } 
+
+#[cfg(test)]
+mod tests {
+    use crate::{masy::MatrixAsym, msy::MatrixSym};
+
+    #[test]
+    fn normal_mult_t() {
+        let mut a = MatrixSym::new();
+        *a =   [[1.0,2.0,1.0,2.0],
+                [2.0,4.0,1.0,2.0],
+                [1.0,1.0,1.0,2.0],
+                [2.0,2.0,2.0,2.0]];
+
+        let mut b = MatrixAsym::new();
+        *b =   [[0.0,1.0,2.0,3.0],
+                [4.0,3.0,2.0,1.0]];
+
+        let mut c = MatrixAsym::new();
+        *c =   [[0.0,4.0],
+                [1.0,3.0],
+                [2.0,2.0],
+                [3.0,1.0]];
+
+        let d = a.b_mult_self_mult_bt(&b);
+
+        let tmp = b.mult(&(a.0));
+        let e = tmp.mult(&c);
+
+        assert!(d.0.similar(&e, 0.001))
+
+    }
+
+    #[test]
+    fn matrix_inv() {
+        let mut a = MatrixSym::new();
+        *a =   [[2.0, 1.0],
+                [1.0,9.0]];
+
+        let mut b = MatrixAsym::new();
+        *b =   [[3.0, 1.0]];
+
+                let mut i = MatrixAsym::new();
+        *i =   [[1.0, 0.0],
+                [0.0, 1.0]];
+
+        let c = b.mult(&a.chol_solve(&i).unwrap());
+        let d = b.chol_solve(&a).unwrap();
+        print!("{}\n",c);
+        print!("{}\n",d); 
+
+        assert!(c.similar(&d, 0.001))
+
+    }
+
+    #[test]
+    fn matrix_chol() {
+        let mut a = MatrixSym::new();
+        *a =   [[1.0, 1.0, 1.0],
+                [1.0, 2.0, 1.0],
+                [1.0,1.0, 4.0]];
+
+        let b = a.chol().unwrap();
+        print!("{} * {} = {}\n",b, b.transpose(), b.mult(&b.transpose())); 
+
+        assert!(a.0.similar(&b.mult(&b.transpose()), 0.001))
+
+    }
+}

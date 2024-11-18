@@ -125,6 +125,17 @@ impl<const M: usize, const N: usize> MatrixAsym<M,N>{
         Ok(result)
     }
 
+    pub fn similar(&self, b: &MatrixAsym<M,N>, tolerance: f64) -> bool{
+        for (linea, lineb) in self.deref().iter().zip(b.deref().iter()){
+            for (a,b) in linea.iter().zip(lineb.iter()){
+                if (a - b).abs() > tolerance{
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
 }
 
 
@@ -157,4 +168,62 @@ impl<const M: usize, const N: usize> fmt::Display for MatrixAsym<M,N>{
         }
         write!(f, "]")
     }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use crate::masy::MatrixAsym;
+
+    #[test]
+    fn add_test() {
+        let mut a = MatrixAsym::new();
+        *a = [[1.0,2.0],
+              [3.0,4.0],
+              [5.0,6.0],
+              [7.0,8.0]];
+
+        let mut b = MatrixAsym::new();
+        *b = [[-1.0,-2.0],
+              [-3.0,-4.0],
+              [-5.0,-6.0],
+              [-7.0,-8.0]];
+
+        let c = a.add(&b);
+
+        let mut d = MatrixAsym::new();
+        *d = [[0.0,0.0],
+              [0.0,0.0],
+              [0.0,0.0],
+              [0.0,0.0]];
+
+        assert!(c.similar(&d, 0.001)); 
+    }
+
+    #[test]
+    fn mul_test() {
+        let mut a = MatrixAsym::new();
+        *a = [[3.0,2.0,1.0],
+              [1.0,0.0,2.0],
+              [3.0,2.0,1.0],
+              [1.0,0.0,2.0]];
+
+        let mut b = MatrixAsym::new();
+        *b = [[1.0,2.0],
+              [0.0,1.0],
+              [4.0,0.0]];
+
+        let c = a.mult(&b);
+
+        let mut d = MatrixAsym::new();
+        *d = [[7.0,8.0],
+              [9.0,2.0],
+              [7.0,8.0],
+              [9.0,2.0]];
+
+        print!("{}\n*{}\n={}",a,b,c);    
+
+        assert!(c.similar(&d, 0.001));  
+ 
+    }    
 }
