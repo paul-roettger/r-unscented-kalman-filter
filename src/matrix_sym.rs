@@ -3,7 +3,7 @@ use std::fmt;
 
 use crate::matrix_asym as masy;
 
-
+/* Symmetric matrix of generic size */
 #[derive(Copy, Clone)]
 pub struct MatrixSym<const M: usize>(pub masy::MatrixAsym<M,M>);
 
@@ -13,11 +13,16 @@ impl<const M: usize> MatrixSym<M>{
         Self { 0: masy::MatrixAsym::new() }
     }
 
+    /* Perform the matrix operation b*M*(b^t) 
+       This operation gets a seperate function because mathematically it alway returns a symmetric matrix.
+       If b.mult(M.mult(&transpose(&b))) was used, the result could be asymmetric due to rounding errors.*/
     pub fn b_mult_self_mult_bt<const U: usize>(&self, b: &masy::MatrixAsym<M,U>) -> MatrixSym<U>{
         let mut result = MatrixSym::new();
         let mut tmp = [[0.0; M]; U];
         let mut sum;
-        for i in 0..U{
+
+        /* Left multiplication */
+        for i in 0..U {
             for j in 0..M {
                 sum = 0.0;
                 for k in 0..M {
@@ -26,6 +31,8 @@ impl<const M: usize> MatrixSym<M>{
                 tmp[i][j] = sum;
             }
         }
+
+        /* Right multiplication and symmetrization */
         for i in 0..U {
             for j in 0..=i {
                 sum = 0.0;
@@ -39,11 +46,11 @@ impl<const M: usize> MatrixSym<M>{
         result
     }
 
+    /* Perform the Cholesky decomposition */
     pub fn chol(&self) -> Result<masy::MatrixAsym<M,M>, &'static str>{
         let mut sum;
         let mut result = masy::MatrixAsym::new();
 
-        /* Cholesky decomposition */
         for i in 0..M{
             for j in 0..=i{
 
@@ -70,11 +77,14 @@ impl<const M: usize> MatrixSym<M>{
         Ok(result)
     }
 
+    /* Solve the equation A*x = b using Cholesky decomposition
+       A has to be symmetric and positive definite */
     pub fn chol_solve<const U: usize>(&self, b: &masy::MatrixAsym<U,M>) -> Result<masy::MatrixAsym<U,M>, &'static str>{
         let mut result = masy::MatrixAsym::new();
         let mut m_y = [[0.0;U];M];
         let mut sum;
 
+        /* Perform Cholesky decomposition */
         let m_l = self.chol()?;
 
         /* forward substitution */
@@ -109,6 +119,7 @@ impl<const M: usize> MatrixSym<M>{
         Ok(result)
     }
 
+    /* subtract two matrices of the same size */
     pub fn sub(&mut self, b: &MatrixSym<M>) -> &mut Self{
         for i in 0..M{
             for j in 0..=i{
@@ -119,6 +130,7 @@ impl<const M: usize> MatrixSym<M>{
         self
     }
 
+    /* add two matrices of the same size */
     pub fn add(&mut self, b: &MatrixSym<M>) -> &mut Self{
         for i in 0..M{
             for j in 0..=i{
@@ -129,6 +141,7 @@ impl<const M: usize> MatrixSym<M>{
         self
     }
 
+    /* Calculate the scalar product */
     pub fn scalar_prod(&mut self, b: f64) -> &mut Self{
         for i in 0..M{
             for j in 0..=i{
@@ -141,6 +154,7 @@ impl<const M: usize> MatrixSym<M>{
 
 }
 
+/* Implementing deref to access val more easily */
 impl<const M: usize> Deref for MatrixSym<M>
 {
     type Target = [[f64;M];M];
@@ -150,6 +164,7 @@ impl<const M: usize> Deref for MatrixSym<M>
     }
 }
 
+/* Implementing derefmut to access val more easily */
 impl<const M: usize> DerefMut for MatrixSym<M>
 {
     fn deref_mut(&mut self) -> &mut Self::Target{
@@ -158,6 +173,7 @@ impl<const M: usize> DerefMut for MatrixSym<M>
     }
 }
 
+/* Implementing Display to show results in tests */
 impl<const M: usize> fmt::Display for MatrixSym<M>{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.0.fmt(f)
@@ -196,6 +212,27 @@ mod tests {
     }
 
     #[test]
+    fn matrix_solve() {
+
+        let mut a = MatrixSym::new();
+        *a =   [[2.0, 1.0, 0.5],
+                [1.0, 9.0, 0.1],
+                [0.5, 0.1, 3.0]];
+
+        let mut b = MatrixAsym::new();
+        *b =   [[1.0],
+                [1.0],
+                [1.0]];
+
+        /* Solve the equation A*x = b */
+        let x = a.chol_solve(&b).unwrap();
+
+        /* Check if A*x == b */
+        let d = a.0.mult(&x);
+        assert!(d.similar(&b, 0.001));
+    }
+
+    #[test]
     fn matrix_inv() {
 
         let mut a = MatrixSym::new();
@@ -209,24 +246,25 @@ mod tests {
                 [0.0, 0.0, 1.0]];
 
         let b = a.chol_solve(&i).unwrap();
-        let c = i.chol_solve(&a).unwrap();
 
+        /* Check if (A⁻1)*A == I */
         assert!(b.mult(&a.0).similar(&i, 0.001));
-        assert!(c.mult(&a.0).similar(&i, 0.001));
-
     }
 
     #[test]
     fn matrix_chol() {
+        /* Create a symmetric positive definite matrix */
         let mut a = MatrixSym::new();
         *a =   [[1.0, 1.0, 1.0],
                 [1.0, 2.0, 1.0],
-                [1.0,1.0, 4.0]];
+                [1.0, 1.0, 4.0]];
 
-        let b = a.chol().unwrap();
-        print!("{} * {} = {}\n",b, b.transpose(), b.mult(&b.transpose())); 
+        /* Get the triangular matrix via Cholesky decomposition*/
+        let l = a.chol().unwrap();
+        print!("{} * {} = {}\n",l, l.transpose(), l.mult(&l.transpose())); 
 
-        assert!(a.0.similar(&b.mult(&b.transpose()), 0.001))
+        /* Check if A == L*(L^T) */
+        assert!(a.0.similar(&l.mult(&l.transpose()), 0.001))
 
     }
 }

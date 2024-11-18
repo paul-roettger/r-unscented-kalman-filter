@@ -8,29 +8,53 @@ fn main() {
     println!("Hello, world!");
 }
 
+/* struct to hold the data for an unscented kalman filter */
 struct UKF<const L: usize, const M: usize, const N: usize> {
+    /* internal scaling factor */
     lambda: f64,
+
+    /* System function to simulate the system state: x(t) = f_sys(x(t-t_sample)) */
     f_sys: fn(&masy::MatrixAsym<1,L>, &masy::MatrixAsym<1,N>) -> masy::MatrixAsym<1,L>,
+    /* System funktion to calculate the system output given the system state: y(t) = h_sys(x(t)) */
     h_sys: fn(&masy::MatrixAsym<1,L>) -> masy::MatrixAsym<1,M>,
+
+    /* internal weights factors */
     wmc0: f64,
     wm0: f64,
     wma: f64,
+
+    /* Covariance of the process noise */
     q: msy::MatrixSym<L>,
+
+    /* Covariance of the measurement noise */
     r: msy::MatrixSym<M>,
+
+    /* Covariance of the filter error */
     p: msy::MatrixSym<L>,
+
+    /* Filtered system state */
     x_p: masy::MatrixAsym<1,L>
 }
 
 impl<const L: usize, const M: usize, const N: usize> UKF<L, M, N>{
-    pub fn new(alpha: f64, 
-        beta: f64, 
-        kappa: f64, 
-        f_sys: fn(&masy::MatrixAsym<1,L>, &masy::MatrixAsym<1,N>) -> masy::MatrixAsym<1,L>,
-        h_sys: fn(&masy::MatrixAsym<1,L>) -> masy::MatrixAsym<1,M>,
-        x_start: &masy::MatrixAsym<1,L>,
-        p_start: &msy::MatrixSym<L>, 
-        q: &msy::MatrixSym<L>, 
-        r: &msy::MatrixSym<M>) -> Self {
+    pub fn new(
+               /* scaling factor for spread of sigma points. Set to value between 1e-4 and 1 */
+               alpha: f64, 
+               /* scaling factor for distribution. For Gaussian set o 2 */
+               beta: f64, 
+               /* scaling factor, is usually set to 0*/
+               kappa: f64, 
+               /* system functions */
+               f_sys: fn(&masy::MatrixAsym<1,L>, &masy::MatrixAsym<1,N>) -> masy::MatrixAsym<1,L>,
+               h_sys: fn(&masy::MatrixAsym<1,L>) -> masy::MatrixAsym<1,M>,
+               /* initial value of the state */
+               x_start: &masy::MatrixAsym<1,L>,
+               /* initial value of the covariance of the filter error */
+               p_start: &msy::MatrixSym<L>, 
+               /* Covariance of the process noise */
+               q: &msy::MatrixSym<L>, 
+               /* Covariance of the measurement noise */
+               r: &msy::MatrixSym<M>) -> Self {
 
         let lambda = (alpha*alpha*(L as f64 + kappa)) - L as f64;
 
@@ -48,7 +72,7 @@ impl<const L: usize, const M: usize, const N: usize> UKF<L, M, N>{
         }
     }
 
-
+    /* Update the filtered system state with a new measurement and system input */
     pub fn update(&mut self, yt: &masy::MatrixAsym<1,M>, ut: &masy::MatrixAsym<1,N>) -> Result<(), &'static str>{
 
         // Step 1 Generate Sigma points
@@ -117,7 +141,7 @@ impl<const L: usize, const M: usize, const N: usize> UKF<L, M, N>{
         };
         
 
-        // Step 3: Opvervation transformation
+        // Step 3: Observation transformation
         let (psi_m_a, psi_m_b, psi_m_c, y_m) = {
             let psi_m_a ;
             let mut psi_m_b = [masy::MatrixAsym::new(); L];
@@ -197,6 +221,7 @@ mod tests {
     use rand::distributions::Distribution;
     use csv::Writer;
 
+    /* System functions for a simple non-linear system to be observed */
     fn ukf_test_f_sys(x: &MatrixAsym<1,4>, _u: &MatrixAsym<1,0>) -> MatrixAsym<1,4>
     {
         let t = 0.1;
@@ -224,6 +249,7 @@ mod tests {
     fn ukf_test() {
         let t_samplesize = 500;
 
+        /* Generate matrices */
         let mut x_start = MatrixAsym::new();
         *x_start  = [[0.0],
                      [0.0],
@@ -245,6 +271,7 @@ mod tests {
         *r = [[1.0, 0.0],
               [0.0, 1.0]];
 
+        /* Calculate squareroot of covariance matrices*/
         let mut sqrt_q = q.0.clone();
         let mut sqrt_r = r.0.clone();
         let mut sqrt_p = p_start.0.clone();
@@ -279,15 +306,18 @@ mod tests {
             }
         }
 
+        /* Generate standard distributed noise 
+           w_t: Process noise
+           v_t: Measurement noise*/
         let distr = rand::distributions::Standard;
         let w_t = distr.sample_iter(rand::thread_rng())
                                               .take(t_samplesize)
                                               .map(|(w1, w2, w3, w4)| {
                                                   let mut v = MatrixAsym::new();
                                                   *v = [[w1],
-                                                      [w2],
-                                                      [w3],
-                                                      [w4]];
+                                                        [w2],
+                                                        [w3],
+                                                        [w4]];
                                                   sqrt_q.mult(&v)
                                               })
                                               .collect::<Vec<_>>();
@@ -302,30 +332,33 @@ mod tests {
                                               })
                                               .collect::<Vec<_>>();
 
+        /* Generate the initial value for the real state of the system */
         let mut x_t = distr.sample_iter(rand::thread_rng())
                                                   .take(1)
                                                   .map(|(v1, v2, v3, v4)| {
                                                       let mut v = MatrixAsym::new();
                                                       *v = [[v1],
-                                                          [v2],
-                                                          [v3],
-                                                          [v4]];
+                                                           [v2],
+                                                           [v3],
+                                                           [v4]];
                                                       *sqrt_p.mult(&v)
                                                              .add(&x_start)
                                                   })
                                                   .collect::<Vec<_>>();
-
+        
+        /* Generate the system sate and add process noise */
         let u = MatrixAsym::new();
         for i in 0..t_samplesize-1{
             x_t.push(*ukf_test_f_sys(&x_t[i], &u).add(&w_t[i]))
         }
 
+        /* Generate the measurement output based on the system state and add measurement noise */
         let mut y_t = vec![];
         for (x, v) in x_t.iter().zip(v_t.iter()){
             y_t.push(*ukf_test_h_sys(x).add(v));
         }
 
-
+        /* Begin the filtering */
         let mut ukf = UKF::new(1.0,
                                               2.0,
                                              0.0, 
@@ -335,13 +368,15 @@ mod tests {
                                                     &p_start, 
                                                     &q, 
                                                     &r);
-
+        
+        /* Update the observed system state using measurement y and input u */
         let mut x_ukf = vec![];
         for y in y_t.iter(){
             x_ukf.push(ukf.x_p);
             ukf.update(y, &u).unwrap();
         }
 
+        /* Write the true and the estimated system state in a csv file  */
         let mut wrt = Writer::from_path("foo.csv").unwrap();
         for (x_test_ukf, x) in x_ukf.iter().zip(x_t.iter()){
             wrt.write_record(x_test_ukf.iter().chain(x.iter()).map(|v| v[0].to_string())).unwrap();

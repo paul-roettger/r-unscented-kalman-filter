@@ -3,7 +3,7 @@ use std::fmt;
 
 use crate::matrix_sym as msy;
 
-
+/* Assymmetric matrix of generic size */
 #[derive(Copy, Clone)]
 pub struct MatrixAsym<const M: usize, const N: usize>{
     pub val: [[f64;M];N]
@@ -15,6 +15,7 @@ impl<const M: usize, const N: usize> MatrixAsym<M,N>{
         Self { val: [[0.0; M];N] }
     }
 
+    /* add two matrices of the same size */
     pub fn add(&mut self, b: &MatrixAsym<M,N>) -> &mut Self{
         for (linea, lineb) in self.deref_mut().iter_mut().zip(b.deref().iter()){
             for (a,b) in linea.iter_mut().zip(lineb.iter()){
@@ -24,6 +25,7 @@ impl<const M: usize, const N: usize> MatrixAsym<M,N>{
         self
     }
 
+    /* subtract two matrices of the same size */
     pub fn sub(&mut self, b: &MatrixAsym<M,N>) -> &mut Self{
         for (linea, lineb) in self.deref_mut().iter_mut().zip(b.deref().iter()){
             for (a,b) in linea.iter_mut().zip(lineb.iter()){
@@ -33,6 +35,7 @@ impl<const M: usize, const N: usize> MatrixAsym<M,N>{
         self
     }
 
+    /* multiplicate two matrices the matrix dimensions may change */
     pub fn mult<const U: usize>(&self, b: &MatrixAsym<U,M>) -> MatrixAsym<U,N>{
 
         let mut result = MatrixAsym::new();
@@ -49,6 +52,9 @@ impl<const M: usize, const N: usize> MatrixAsym<M,N>{
         result
     }
 
+    /* Perform the matrix operation M*(M^t) 
+       This operation gets a seperate function because mathematically it alway returns a symmetric matrix.
+       If M.mult(&transpose(&M)) was used, the result could be asymmetric due to rounding errors.*/
     pub fn self_mult_selft<const U: usize>(&self) -> msy::MatrixSym<N>{
 
         let mut result = msy::MatrixSym::new();
@@ -66,6 +72,7 @@ impl<const M: usize, const N: usize> MatrixAsym<M,N>{
         result
     }
 
+    /* Calculate the scalar product */
     pub fn scalar_prod(&mut self, b: f64) -> &mut Self{
         for line in self.deref_mut().iter_mut(){
             for value in line.iter_mut(){
@@ -75,6 +82,7 @@ impl<const M: usize, const N: usize> MatrixAsym<M,N>{
         self
     }
 
+    /* Get the transpose to a given matrix */
     pub fn transpose(&self) -> MatrixAsym<N,M>{
         let mut result = MatrixAsym::new();
         for i in 0..M {
@@ -85,13 +93,15 @@ impl<const M: usize, const N: usize> MatrixAsym<M,N>{
         result
     }
 
-
-    pub fn chol_solve(&self, b: &msy::MatrixSym<M>) -> Result<MatrixAsym<M,N>, &'static str>{
+    /* Solve the equation x*A = b using Cholesky decomposition
+       A has to be symmetric and positive definite */
+    pub fn chol_solve(&self, a: &msy::MatrixSym<M>) -> Result<MatrixAsym<M,N>, &'static str>{
         let mut result = MatrixAsym::new();
         let mut m_y = [[0.0;N];M];
         let mut sum;
 
-        let m_l = b.chol()?;
+        /* Perform Cholesky decomposition */
+        let m_l = a.chol()?;
 
         /* forward substitution */
         for i in 0..N{
@@ -122,9 +132,12 @@ impl<const M: usize, const N: usize> MatrixAsym<M,N>{
                 }
             }
         }
+
         Ok(result)
     }
 
+    /* Check if two matrices are similar
+       If one or more entries differs between the matrices by a value > tolerance returns false, else return true */
     pub fn similar(&self, b: &MatrixAsym<M,N>, tolerance: f64) -> bool{
         for (linea, lineb) in self.deref().iter().zip(b.deref().iter()){
             for (a,b) in linea.iter().zip(lineb.iter()){
@@ -139,7 +152,7 @@ impl<const M: usize, const N: usize> MatrixAsym<M,N>{
 }
 
 
-
+/* Implementing deref to access val more easily */
 impl<const M: usize, const N: usize> Deref for MatrixAsym<M,N>
 {
     type Target = [[f64;M];N];
@@ -149,6 +162,7 @@ impl<const M: usize, const N: usize> Deref for MatrixAsym<M,N>
     }
 }
 
+/* Implementing derefmut to access val more easily */
 impl<const M: usize, const N: usize> DerefMut for MatrixAsym<M,N>
 {
     fn deref_mut(&mut self) -> &mut Self::Target{
@@ -156,6 +170,7 @@ impl<const M: usize, const N: usize> DerefMut for MatrixAsym<M,N>
     }
 }
 
+/* Implementing Display to show results in tests */
 impl<const M: usize, const N: usize> fmt::Display for MatrixAsym<M,N>{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "[\n")?;
@@ -173,7 +188,7 @@ impl<const M: usize, const N: usize> fmt::Display for MatrixAsym<M,N>{
 
 #[cfg(test)]
 mod tests {
-    use crate::masy::MatrixAsym;
+    use crate::{masy::MatrixAsym, msy::MatrixSym};
 
     #[test]
     fn add_test() {
@@ -226,4 +241,43 @@ mod tests {
         assert!(c.similar(&d, 0.001));  
  
     }    
+
+    #[test]
+    fn matrix_solve() {
+
+        let mut a = MatrixSym::new();
+        *a =   [[2.0, 1.0, 0.5],
+                [1.0, 9.0, 0.1],
+                [0.5, 0.1, 3.0]];
+
+        let mut b = MatrixAsym::new();
+        *b =   [[1.0, 1.0, 1.0]];
+
+        /* Solve the equation x*A = b */
+        let x = b.chol_solve(&a).unwrap();
+
+        /* Check if x*A == b */
+        let d = x.mult(&a.0);
+        assert!(d.similar(&b, 0.001));
+    }
+
+    #[test]
+    fn matrix_inv() {
+
+        let mut a = MatrixSym::new();
+        *a =   [[2.0, 1.0, 0.5],
+                [1.0, 9.0, 0.1],
+                [0.5, 0.1, 3.0]];
+
+        let mut i = MatrixAsym::new();
+        *i =   [[1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0]];
+
+        let b = i.chol_solve(&a).unwrap();
+
+        /* Check if (A⁻1)*A == I */
+        assert!(b.mult(&a.0).similar(&i, 0.001));
+
+    }
 }
