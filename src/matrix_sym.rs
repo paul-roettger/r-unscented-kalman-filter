@@ -197,23 +197,22 @@ mod tests {
 
     #[test]
     fn matrix_inv() {
+
         let mut a = MatrixSym::new();
-        *a =   [[2.0, 1.0],
-                [1.0,9.0]];
+        *a =   [[2.0, 1.0, 0.5],
+                [1.0, 9.0, 0.1],
+                [0.5, 0.1, 3.0]];
 
-        let mut b = MatrixAsym::new();
-        *b =   [[3.0, 1.0]];
+        let mut i = MatrixAsym::new();
+        *i =   [[1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0]];
 
-                let mut i = MatrixAsym::new();
-        *i =   [[1.0, 0.0],
-                [0.0, 1.0]];
+        let b = a.chol_solve(&i).unwrap();
+        let c = i.chol_solve(&a).unwrap();
 
-        let c = b.mult(&a.chol_solve(&i).unwrap());
-        let d = b.chol_solve(&a).unwrap();
-        print!("{}\n",c);
-        print!("{}\n",d); 
-
-        assert!(c.similar(&d, 0.001))
+        assert!(b.mult(&a.0).similar(&i, 0.001));
+        assert!(c.mult(&a.0).similar(&i, 0.001));
 
     }
 
