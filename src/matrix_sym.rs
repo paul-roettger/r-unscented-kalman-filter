@@ -52,26 +52,29 @@ impl<const M: usize> MatrixSym<M>{
         let mut result = masy::MatrixAsym::new();
 
         for i in 0..M{
-            for j in 0..=i{
-
+            
+            for j in 0..i{
                 sum = 0.0;
                 for k in 0..j{
                     sum += result[i][k] * result[j][k];
                 }
 
-                if i == j{
-                    if self[i][i] - sum >= 0.0 {
-                        result[i][j] = (self[i][i] - sum).sqrt();
-                    }else {
-                        return Err("Negative squareroot");
-                    }
-                } else {
-                    if result[j][j] != 0.0{
-                        result[i][j] = (1.0 / result[j][j]) * (self[i][j] - sum);
-                    }else{
-                        return Err("Div 0");
-                    }
+                if result[j][j] != 0.0{
+                    result[i][j] = (1.0 / result[j][j]) * (self[i][j] - sum);
+                }else{
+                    return Err("Div 0");
                 }
+            }
+
+            sum = 0.0;
+            for k in 0..i{
+                sum += result[i][k] * result[i][k];
+            }
+
+            if self[i][i] - sum >= 0.0 {
+                result[i][i] = (self[i][i] - sum).sqrt();
+            }else {
+                return Err("Negative squareroot");
             }
         }
         Ok(result)
