@@ -6,7 +6,7 @@ The Unscented Kalman Filter can be used to observe non-linear time-invariant sys
 ## Run from Source
 
 ```bash
-git clone https://github.com/paul-roettger/r-signal-fold.git
-cd r-signal-fold
+git clone git@github.com:paul-roettger/r-unscented-kalman-filter.git
+cd r-unscented-kalman-filter
 cargo test
 ```
