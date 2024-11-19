@@ -377,7 +377,8 @@ mod tests {
         }
 
         /* Write the true and the estimated system state in a csv file  */
-        let mut wrt = Writer::from_path("foo.csv").unwrap();
+        let mut wrt = Writer::from_path("system_state.csv").unwrap();
+        wrt.write_record(["x1_p", "x2_p", "x3_p", "x4_p", "x1", "x2", "x3", "x4",]).unwrap();
         for (x_test_ukf, x) in x_ukf.iter().zip(x_t.iter()){
             wrt.write_record(x_test_ukf.iter().chain(x.iter()).map(|v| v[0].to_string())).unwrap();
         }
